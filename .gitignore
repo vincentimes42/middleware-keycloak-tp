@@ -1,0 +1,32 @@
+# --- Keycloak ---
+.keycloak-data/
+kc-data/
+
+# --- Java / build ---
+target/
+*.log
+
+# --- IDE ---
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+bin/
+
+# --- Node / SPA (bonus) ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Misc ---
+.env
+*.local
+*.sqlite
+*.sqlite3

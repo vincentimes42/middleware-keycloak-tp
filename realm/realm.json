@@ -1,0 +1,113 @@
+{
+  "realm": "listings",
+  "enabled": true,
+  "displayName": "Listings",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+
+  "attributes": {
+    "frontend_url": "http://localhost:3000"
+  },
+
+  "roles": {
+    "realm": [
+      { "name": "seller", "description": "Can create and manage own listings" },
+      { "name": "admin",  "description": "Platform administration (bonus)" }
+    ],
+    "client": {
+      "listings-api": []
+    }
+  },
+
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@listings.local",
+      "enabled": true,
+      "firstName": "Alice",
+      "lastName": "Seller",
+      "emailVerified": true,
+      "attributes": {},
+      "credentials": [
+        { "type": "password", "value": "secret", "temporary": false }
+      ],
+      "realmRoles": ["seller"]
+    },
+    {
+      "username": "bob",
+      "email": "bob@listings.local",
+      "enabled": true,
+      "firstName": "Bob",
+      "lastName": "Seller",
+      "emailVerified": true,
+      "attributes": {},
+      "credentials": [
+        { "type": "password", "value": "secret", "temporary": false }
+      ],
+      "realmRoles": ["seller"]
+    }
+  ],
+
+  "clients": [
+    {
+      "clientId": "listings-api",
+      "name": "Listings API client",
+      "description": "Confidential client used by scripts / Postman to get tokens",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "secret": "listings-api-secret",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": [
+        "http://localhost:3000/auth/callback",
+        "http://localhost:5500/auth/callback"
+      ],
+      "webOrigins": [
+        "+",
+        "http://localhost:3000",
+        "http://localhost:5500"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "roles",
+        "profile",
+        "email"
+      ],
+      "fullScopeAllowed": true
+    },
+
+    {
+      "clientId": "listings-spa",
+      "name": "Listings SPA (bonus)",
+      "enabled": true,
+      "description": "Public client used by the bonus SPA",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "redirectUris": [
+        "http://localhost:3000/auth/callback",
+        "http://localhost:5500/auth/callback"
+      ],
+      "webOrigins": [
+        "+",
+        "http://localhost:3000",
+        "http://localhost:5500"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "roles",
+        "profile",
+        "email"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+# =====================================================================
+#  TP Keycloak — stack d'identité
+#
+#  Ce compose démarre uniquement l'IDENTITY PROVIDER + sa persistance.
+#  L'application Spring Boot (le TP1) est lancée à côté, en local,
+#  via `mvn spring-boot:run` dans le dossier ../springboot
+#  (la même commande que dans le TP1).
+#
+#  Pour les instructions complètes, voir `../README.md` et `exercise.md`.
+#
+#  Démarrer        : docker compose up -d
+#  Vérifier santé  : curl -fsS http://localhost:8080/health/ready
+#  Arrêter         : docker compose down        (garder les données)
+#  Réinitialiser   : docker compose down -v     (efface Postgres + Keycloak)
+# =====================================================================
+
+name: keycloak-listings-tp
+
+networks:
+  keycloak-net:
+    driver: bridge
+
+volumes:
+  kc-data:   # data Keycloak (sessions, cache, ...)
+  pg-data:   # data Postgres (realm, clients, users)
+
+services:
+
+  # --------------------------------------------------------------------
+  #  Postgres 16 — persistance de Keycloak (realm, clients, users)
+  #
+  #  NB : la BDD de l'application Spring Boot du TP1 reste SQLite
+  #  (voir ../springboot/application.yml). Ce Postgres est seulement
+  #  pour Keycloak.
+  # --------------------------------------------------------------------
+  postgres:
+    image: postgres:16
+    container_name: tp-postgres
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    ports:
+      # 5433 hôte -> 5432 conteneur : laisse 5432 libre pour l'étudiant
+      # s'il fait tourner son propre Postgres (pgadmin, psql local, etc.)
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [keycloak-net]
+
+  # --------------------------------------------------------------------
+  #  Keycloak 26.8
+  #
+  #  - start-dev : pas de master password, pas de TLS (usage scolaire).
+  #  - --import-realm : au premier boot, Keycloak importe tous les
+  #    *.json trouvés dans /opt/keycloak/data/import/  -> c'est notre
+  #    realm `listings`. Stratégie IGNORE_EXISTING : si le realm existe
+  #    déjà (réstart), il est conservé.
+  #
+  #  - admin console : http://localhost:8080/admin  (admin/admin)
+  #  - santé       : http://localhost:8080/health/ready
+  #  - issuer      : http://localhost:8080/realms/listings
+  #
+  #  Si tu modifies realm.json, soit :
+  #    (a) tu relances avec `docker compose down -v && docker compose up -d`
+  #        (perte de données Keycloak), soit
+  #    (b) tu passes par l'admin console en http://localhost:8080/admin
+  # --------------------------------------------------------------------
+  keycloak:
+    image: keycloak/keycloak:26.8
+    container_name: tp-keycloak
+    command: >
+      start-dev
+      --http-relative-path=/
+      --import-realm
+    environment:
+      # bootstrap admin (utilisable via l'admin REST API / l'admin console)
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # datasource (postgres)
+      KC_DB: postgres
+      KC_DB_URL: "jdbc:postgresql://postgres:5432/keycloak"
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      # health endpoint
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"   # HTTP : OIDC, admin console, health
+    volumes:
+      # on monte le dossier `./realm` (contient realm.json) en read-only
+      # dans le répertoire d'import de Keycloak. Bind-mount d'un
+      # REPERTOIRE (pas d'un fichier seul) => fiable sur tous les drivers.
+      - ./realm:/opt/keycloak/data/import:ro
+      - kc-data:/opt/keycloak/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [keycloak-net]
+    healthcheck:
+      # L'image Keycloak n'embarque pas `curl`. On se contente d'un
+      # sondage TCP du port 8080 : s'il est ouvert, l'application est
+      # prête à servir (Keycloak démarre son HTTP server avant la fin
+      # de son bootstrap et le port est fermé tant qu'il n'est pas prêt).
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080 && exit 0' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s

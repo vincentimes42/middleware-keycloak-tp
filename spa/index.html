@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Classifieds — Keycloak bonus</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 2rem; background: #f6f7f9; }
+    h1 { font-size: 1.4rem; }
+    .card { background: #fff; border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,.05); display: flex;
+            justify-content: space-between; align-items: center; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem;
+             background: #eef3ff; color: #1c3aa8; margin-right: 8px; }
+    button { padding: 8px 14px; border: 0; border-radius: 8px; font-size: 0.9rem; cursor: pointer; }
+    button.primary { background: #1c64f2; color: #fff; }
+    button.ghost { background: transparent; color: #1c64f2; border: 1px solid #1c64f2; }
+    form label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.9rem; }
+    form input, form select { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; }
+    .status { white-space: pre-wrap; font-size: 0.85rem; background: #fff;
+              border-left: 4px solid #1c64f2; padding: 0.75rem 1rem; border-radius: 6px;
+              font-family: ui-monospace, monospace; margin-top: 1rem; }
+    .muted { color: #666; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1 class="header">Classifieds — listings <span class="muted">(TP2 bonus, auth Keycloak)</span></h1>
+  <p class="muted">Identités : <code>alice / secret</code> (seller) —
+     API: <code>localhost:8081</code></p>
+
+  <div id="auth-area">
+    <button id="login" class="primary">Login</button>
+    <button id="logout" class="ghost" style="display:none">Logout</button>
+    <button id="whoami" class="ghost" style="display:none">Who am I ?</button>
+  </div>
+
+  <h2>New listing</h2>
+  <form id="create-form" autocomplete="off">
+    <label>Title <input name="title" maxlength="120" required /></label>
+    <label>Price (decimals) <input name="price" type="number" step="0.01" min="0.01" /></label>
+    <label>Category
+      <select name="category" id="category"></select>
+    </label>
+    <button class="primary">Create</button>
+  </form>
+
+  <h2>Listings</h2>
+  <div id="listings"></div>
+
+  <pre class="status" id="status"></pre>
+
+  <script src="/js/config.js"></script>
+  <!-- keycloak-js servi directement par l'image keycloak/keycloak:26.8 -->
+  <script src="http://localhost:8080/js/keycloak.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+</body>
+</html>
