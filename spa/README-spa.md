@@ -1,34 +1,33 @@
-# SPA bonus — Listings d'achat / vente
+# SPA bonus — Classifieds
 
-> Cette SPA est **optionnelle / bonus** (Step 7 du TP). Elle remplace les `curl`
-> du TP1 par une petite interface qui consomme l'api du TP1 **avec un JWT
-> Keycloak**.
+> This SPA is **optional / bonus** (TP Step 7). It replaces the TP1 `curl`
+> calls with a small interface that consumes the TP1 API **with a Keycloak JWT**.
 
 ## Stack
 
-Une page HTML + 4 scripts JS (`config.js`, `auth.js`, `api.js`, `ui.js`).
-Aucun framework. Aucune dependance à installer (tout fonctionne en vanilla JS
-+ `fetch`).
+One HTML page + 4 JS scripts (`config.js`, `auth.js`, `api.js`, `ui.js`).
+No framework. No dependency to install (everything runs with vanilla JS +
+`fetch`).
 
-Pour l'auth on utilise le client **Keycloak officiel** [`keycloak-js`](https://github.com/keycloak/keycloak-js)
-servi directement par l'image `keycloak/keycloak:26.8`:
-`http://localhost:8080/js/keycloak.js`. Pas de `npm`, pas de `node_modules`.
+For auth we use the **official Keycloak client**
+[`keycloak-js`](https://github.com/keycloak/keycloak-js), served directly by
+the `keycloak/keycloak:26.8` image:
+`http://localhost:8080/js/keycloak.js`. No `npm`, no `node_modules`.
 
-## Démarrer
+## Run
 
-La SPA est servie par **n'importe quel serveur statique HTML** qui met à
-dispo les fichiers (ex. `python3 -m http.server 3000`) depuis le dossier
-contenant `index.html`.
+The SPA is served by **any static HTML server** that exposes the files
+(e.g. `python3 -m http.server 3000`) from the folder containing `index.html`.
 
-Option A (le plus simple):
+Option A (simplest):
 
 ```bash
-# dans le dossier `spa/`
+# in the `spa/` folder
 python3 -m http.server 3000
-# ouvrir http://localhost:3000
+# open http://localhost:3000
 ```
 
-Option B (nginx ou caddy) si l'étudiant connaît :
+Option B (nginx or caddy), if you know them:
 
 ```dockerfile
 FROM nginx:alpine AS spa
@@ -40,38 +39,38 @@ CMD ["nginx", "-g", "daemon off;"]
 
 ## Config (js/config.js)
 
-| clé | valeur attendue |
+| key | expected value |
 |---|---|
 | `KEYCLOAK_URL` | `http://localhost:8080` |
 | `REALM` | `listings` |
-| `CLIENT` | `listings-spa` (le client **public** défini dans realm.json) |
-| `API` | `http://localhost:8081` (le TP1 monté sur le port 8081 via docker) |
+| `CLIENT` | `listings-spa` (the **public** client defined in `realm.json`) |
+| `API` | `http://localhost:8081` (TP1 published on port 8081 via docker) |
 
-> NB : en environnement académique on part de `http://localhost:8081` pour
-> l'API parce que le port `8080` est réservé à Keycloak. Si l'étudiant fait
-> tourner le TP1 **localement sur 8080**, il change juste `API` en `http://localhost:8080`.
+> NB: in the academic environment the API defaults to
+> `http://localhost:8081` because port `8080` is reserved for Keycloak. If you
+> run TP1 **locally on 8080**, just change `API` to `http://localhost:8080`.
 
-## Flux
+## Flow
 
-1. `ui.js` vérifie `kc.authenticated`. Si non → `auth.js` appelle `kc.login()`.
-2. Keycloak redirige sur la page de login du realm `listings`.
-3. L'utilisateur rentre `alice`/`secret` (ou `bob`/`secret`).
-4. Keycloak redirige sur `http://localhost:3000/auth/callback` avec un `code`.
-5. `auth.js` fait l'échange `code` → `access_token` via l'endpoint token de
-   Keycloak (PKCE S256).
-6. `ui.js` appelle `GET /listings` avec `Authorization: Bearer <jwt>`.
-7. Refresh automatique: si le token expire, `auth.js` appelle `kc.updateToken(30)`
-   avant l'endpoint.
+1. `ui.js` checks `kc.authenticated`. If not → `auth.js` calls `kc.login()`.
+2. Keycloak redirects to the login page of the `listings` realm.
+3. The user types `alice`/`secret` (or `bob`/`secret`).
+4. Keycloak redirects to `http://localhost:3000/auth/callback` with a `code`.
+5. `auth.js` exchanges `code` → `access_token` via the Keycloak token endpoint
+   (PKCE S256).
+6. `ui.js` calls `GET /listings` with `Authorization: Bearer <jwt>`.
+7. Automatic refresh: if the token is about to expire, `auth.js` calls
+   `kc.updateToken(30)` before the request.
 
-## Ce que la SPA ne fait PAS
+## What the SPA does NOT do
 
-- Pas de gestion de `refresh_token` par l'UI (c'est Keycloak qui gère).
-- Pas de `localStorage` pour le mot de passe (Keycloak gère le login).
-- Pas de CORS (le server doit le déclarer s'il est sur un autre port).
+- No `refresh_token` handling in the UI (Keycloak handles it).
+- No `localStorage` for the password (Keycloak handles the login).
+- No CORS of its own (the server must declare it if it runs on another port).
 
-## Si ça ne marche pas
+## If it does not work
 
-1. Vérifier que `docker compose ps` est healthy.
-2. Ouvrir `http://localhost:3080/realms/listings/protocol/openid-connect/authorize?client_id=listings-spa&redirect_uri=http://localhost:3000/auth/callback&response_type=code` — si la page de login n'apparait pas, le CORS ou `webOrigins` n'est pas bien réglé dans `realm.json`.
-3. Vérifier la console du navigateur (403 = pas le role, 401 = pas de token).
-4. Vérifier que l'API Spring Boot du TP1 tourne sur `localhost:8081`.
+1. Check that `docker compose ps` is healthy.
+2. Open `http://localhost:8080/realms/listings/protocol/openid-connect/authorize?client_id=listings-spa&redirect_uri=http://localhost:3000/auth/callback&response_type=code` — if the login page does not appear, CORS or `webOrigins` is not set correctly in `realm.json`.
+3. Check the browser console (403 = wrong role, 401 = no token).
+4. Check that the TP1 Spring Boot API is running on `localhost:8081`.

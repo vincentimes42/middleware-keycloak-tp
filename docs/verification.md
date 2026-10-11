@@ -1,54 +1,54 @@
-# Keycloak — vérification de la stack
+# Keycloak — stack verification
 
-Objectif : vérifier que la stack (Keycloak + Postgres) est montée, que le realm
-`listings` est importé, et qu'on y obtient un token JWT valide pour `alice`.
+Goal: verify that the stack (Keycloak + Postgres) is up, that the `listings`
+realm is imported, and that we can obtain a valid JWT for `alice`.
 
-## 1) Prérequis
+## 1) Prerequisites
 
-- `docker compose` disponible (`docker compose version`).
-- Port 8080 libre (Keycloak) et 5433 libre (Postgres publié).
+- `docker compose` available (`docker compose version`).
+- Port 8080 free (Keycloak) and 5433 free (exposed Postgres).
 
-## 2) Démarrer
+## 2) Start
 
 ```bash
 cd keycloak
 docker compose up -d
 ```
 
-Le `depends_on` attend que `postgres` passe en `healthy` avant de monter
-`keycloak`. Quand l'app est prête, le healthcheck passe en `healthy`.
+`depends_on` waits for `postgres` to become `healthy` before starting
+`keycloak`. Once the app is ready, the healthcheck turns `healthy`.
 
-Suivi :
+Tail:
 
 ```bash
 docker compose ps              # tp-keycloak  healthy / tp-postgres  healthy
 docker compose logs -f keycloak
 ```
 
-## 3) URLs utiles
+## 3) Useful URLs
 
-| URL | Rôle |
+| URL | Purpose |
 |---|---|
 | <http://localhost:8080/admin> | Admin console (login `admin` / `admin`) |
-| <http://localhost:8080/realms/listings/account/> | Console utilisateur (`alice` / `secret`) |
+| <http://localhost:8080/realms/listings/account/> | User console (`alice` / `secret`) |
 | <http://localhost:8080/realms/listings/.well-known/openid-configuration> | OIDC metadata |
-| <http://localhost:8080/realms/listings/protocol/openid-connect/certs> | JWKS (clés publiques) |
+| <http://localhost:8080/realms/listings/protocol/openid-connect/certs> | JWKS (public keys) |
 | <http://localhost:8080/realms/listings/protocol/openid-connect/token> | Token endpoint |
 
-## 4) Rôles et comptes
+## 4) Roles and accounts
 
-| Identitant | Rôle realm | Mot de passe |
+| Account | Realm role | Password |
 |---|---|---|
-| `admin` (realm master) | admin | `admin` |
+| `admin` (master realm) | admin | `admin` |
 | `alice` | `seller` | `secret` |
 | `bob` | `seller` | `secret` |
 
-Comptes / rôles créés par `realm/realm.json`.
+Accounts / roles are created by `realm/realm.json`.
 
-## 5) Obtenir un token (le geste type)
+## 5) Obtain a token (the canonical call)
 
 ```bash
-# client confidential : listings-api (secret: listings-api-secret)
+# confidential client: listings-api (secret: listings-api-secret)
 curl -fsS -X POST http://localhost:8080/realms/listings/protocol/openid-connect/token \
   -d grant_type=password \
   -d client_id=listings-api \
@@ -57,12 +57,12 @@ curl -fsS -X POST http://localhost:8080/realms/listings/protocol/openid-connect/
   -d password=secret
 ```
 
-Réponse attendue : un JSON avec `access_token`, `refresh_token`, `expires_in`,
+Expected response: a JSON with `access_token`, `refresh_token`, `expires_in`,
 `scope`, `token_type` (Bearer).
 
-## 6) Lire le JWT (sans library)
+## 6) Read the JWT (no library)
 
-Le token est `header.payload.signature` en base64url. Pour lire le `payload` :
+The token is `header.payload.signature` in base64url. To read the `payload`:
 
 ```bash
 ACCESS=$(curl -fsS -X POST http://localhost:8080/realms/listings/protocol/openid-connect/token \
@@ -76,45 +76,49 @@ print(json.dumps(json.loads(base64.urlsafe_b64decode(raw)), indent=2))
 PY
 ```
 
-Clés qui comptent pour l'application Spring Boot (voir `exercise.md`) :
+Claims that matter for the Spring Boot application (see `exercise.md`):
 
-| claim | valeur d'exemple |
+| claim | example value |
 |---|---|
 | `iss` | `http://localhost:8080/realms/listings` |
-| `sub` | le `uuid` Keycloak de l'utilisateur (stable, unique) |
+| `sub` | the Keycloak `uuid` of the user (stable, unique) |
 | `azp` | `listings-api` |
 | `preferred_username` | `alice` |
 | `email` | `alice@listings.local` |
 | `realm_access.roles` | `["seller"]` |
-| `scope` | `basic profile email` |
+| `scope` | `email profile` |
 
-> `sub` est la clé stable qui remplace la table `user` du TP1 — c'est la valeur
-> attendue dans `listing.owner_sub`.
+> `sub` is the stable key that replaces the TP1 `user` table — it is the value
+> expected in `listing.owner_sub`.
 
-## 7) Arrêter
+> **Note:** the `scope` claim lists the standard OIDC scopes (profile, email,
+> ...). The realm roles live in a separate `realm_access.roles` array — that
+> is where `seller` is, not in the `scope`.
+
+## 7) Stop
 
 ```bash
-# garder les données
+# keep the data
 docker compose down
 
-# tout effacer (Postgres + Keycloak)
+# wipe everything (Postgres + Keycloak)
 docker compose down -v
 ```
 
-## 8) Réinitialiser la stack
+## 8) Reset the stack
 
 ```bash
 docker compose down -v && docker compose up -d
 ```
 
-Le realm est réimporté au premier boot (`--import-realm`, `ignoreExisting`),
-les comptes de démo reviennent à l'état initial.
+The realm is re-imported on the first boot (`--import-realm`, `ignoreExisting`),
+and the demo accounts return to their initial state.
 
-## 9) Problèmes fréquents
+## 9) Common issues
 
-| Symptôme | Cause | Correction |
+| Symptom | Cause | Fix |
 |---|---|---|
-| `tp-keycloak` redémarre | `postgres` pas ready | vérifier `docker compose logs postgres` |
-| `401 invalid_client` | `client_secret` faux | utiliser `listings-api-secret` |
-| `sub` absent du token | manque de `basic` scope | `basic` + `roles` sont déjà dans le realm.json |
-| `404 /health/ready` | chemin health 26.x non monté | ne pas s'appuyer sur ce endpoint; tester `/realms/listings/.well-known/openid-configuration` |
+| `tp-keycloak` restarts | `postgres` not ready | check `docker compose logs postgres` |
+| `401 invalid_client` | wrong `client_secret` | use `listings-api-secret` |
+| `sub` missing from token | `basic` scope missing | `basic` + `roles` are already in `realm.json` |
+| `404 /health/ready` | 26.x health path not mounted | don't rely on it; test `/realms/listings/.well-known/openid-configuration` |

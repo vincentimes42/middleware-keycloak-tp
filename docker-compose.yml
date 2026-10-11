@@ -1,17 +1,16 @@
 # =====================================================================
-#  TP Keycloak — stack d'identité
+#  TP Keycloak — identity stack
 #
-#  Ce compose démarre uniquement l'IDENTITY PROVIDER + sa persistance.
-#  L'application Spring Boot (le TP1) est lancée à côté, en local,
-#  via `mvn spring-boot:run` dans le dossier ../springboot
-#  (la même commande que dans le TP1).
+#  This compose starts ONLY the identity provider and its persistence.
+#  The Spring Boot application (TP1, ../springboot) is started separately,
+#  on the host, with `mvn spring-boot:run` (same command as TP1).
 #
-#  Pour les instructions complètes, voir `../README.md` et `exercise.md`.
+#  Full instructions: see `../README.md` and `exercise.md`.
 #
-#  Démarrer        : docker compose up -d
-#  Vérifier santé  : curl -fsS http://localhost:8080/health/ready
-#  Arrêter         : docker compose down        (garder les données)
-#  Réinitialiser   : docker compose down -v     (efface Postgres + Keycloak)
+#  Start            : docker compose up -d
+#  Health check     : curl -fsS http://localhost:8080/health/ready
+#  Stop (keep data) : docker compose down
+#  Reset (wipe)     : docker compose down -v     (wipes Postgres + Keycloak)
 # =====================================================================
 
 name: keycloak-listings-tp
@@ -29,9 +28,8 @@ services:
   # --------------------------------------------------------------------
   #  Postgres 16 — persistance de Keycloak (realm, clients, users)
   #
-  #  NB : la BDD de l'application Spring Boot du TP1 reste SQLite
-  #  (voir ../springboot/application.yml). Ce Postgres est seulement
-  #  pour Keycloak.
+  #  NB: the TP1 Spring Boot application keeps using SQLite
+  #  (see ../springboot/application.yml). This Postgres is Keycloak-only.
   # --------------------------------------------------------------------
   postgres:
     image: postgres:16
@@ -41,8 +39,8 @@ services:
       POSTGRES_USER: keycloak
       POSTGRES_PASSWORD: keycloak
     ports:
-      # 5433 hôte -> 5432 conteneur : laisse 5432 libre pour l'étudiant
-      # s'il fait tourner son propre Postgres (pgadmin, psql local, etc.)
+      # Host 5433 -> container 5432: keeps 5432 free in case the student
+      # is running their own Postgres (pgadmin, local psql, etc.)
       - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
@@ -57,20 +55,20 @@ services:
   # --------------------------------------------------------------------
   #  Keycloak 26.8
   #
-  #  - start-dev : pas de master password, pas de TLS (usage scolaire).
-  #  - --import-realm : au premier boot, Keycloak importe tous les
-  #    *.json trouvés dans /opt/keycloak/data/import/  -> c'est notre
-  #    realm `listings`. Stratégie IGNORE_EXISTING : si le realm existe
-  #    déjà (réstart), il est conservé.
+  #  - start-dev : no master password, no TLS (academic use only).
+  #  - --import-realm : at first boot, Keycloak imports every `*.json`
+  #    found in /opt/keycloak/data/import/  -> that is our `listings`
+  #    realm. Strategy IGNORE_EXISTING: if the realm already exists on
+  #    restart, it is kept.
   #
   #  - admin console : http://localhost:8080/admin  (admin/admin)
-  #  - santé       : http://localhost:8080/health/ready
-  #  - issuer      : http://localhost:8080/realms/listings
+  #  - health        : http://localhost:8080/health/ready
+  #  - issuer        : http://localhost:8080/realms/listings
   #
-  #  Si tu modifies realm.json, soit :
-  #    (a) tu relances avec `docker compose down -v && docker compose up -d`
-  #        (perte de données Keycloak), soit
-  #    (b) tu passes par l'admin console en http://localhost:8080/admin
+  #  If you modify realm.json, either:
+  #    (a) reset with `docker compose down -v && docker compose up -d`
+  #        (Keycloak data is lost), or
+  #    (b) edit through the admin console at http://localhost:8080/admin
   # --------------------------------------------------------------------
   keycloak:
     image: keycloak/keycloak:26.8
@@ -93,9 +91,9 @@ services:
     ports:
       - "8080:8080"   # HTTP : OIDC, admin console, health
     volumes:
-      # on monte le dossier `./realm` (contient realm.json) en read-only
-      # dans le répertoire d'import de Keycloak. Bind-mount d'un
-      # REPERTOIRE (pas d'un fichier seul) => fiable sur tous les drivers.
+      # Mount the `./realm` directory (which contains realm.json)
+      # read-only into Keycloak's import folder. A directory bind-mount
+      # (not a single file) is reliable across all overlay drivers.
       - ./realm:/opt/keycloak/data/import:ro
       - kc-data:/opt/keycloak/data
     depends_on:
@@ -103,10 +101,9 @@ services:
         condition: service_healthy
     networks: [keycloak-net]
     healthcheck:
-      # L'image Keycloak n'embarque pas `curl`. On se contente d'un
-      # sondage TCP du port 8080 : s'il est ouvert, l'application est
-      # prête à servir (Keycloak démarre son HTTP server avant la fin
-      # de son bootstrap et le port est fermé tant qu'il n'est pas prêt).
+      # The Keycloak image does not ship `curl`. We do a plain TCP probe
+      # on port 8080: if it is open the app is ready to serve (Keycloak
+      # closes the port until bootstrap completes).
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080 && exit 0' || exit 1"]
       interval: 10s
       timeout: 5s

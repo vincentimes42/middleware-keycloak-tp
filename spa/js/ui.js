@@ -1,5 +1,5 @@
 // =====================================================
-//  ui.js — affichage + événements
+//  ui.js — rendering + events
 // =====================================================
 (function () {
   const $ = (sel) => document.querySelector(sel);
@@ -17,8 +17,7 @@
 
   async function refresh() {
     if (!window.kc) return;
-    // si le token est proche de l'expiration, on le renouvelle
-    // (30 s de marge pour ne pas casser la requete)
+    // if the token is near expiry, renew it (30s margin)
     try { await window.kc.updateToken(30); } catch (e) {
       window.location.reload();
       return;
@@ -40,7 +39,7 @@
       $("#listings").innerHTML = html;
       status(`OK — HTTP ${code} — ${rows ? rows.length : 0} items`);
     } catch (e) {
-      status("Erreur HTTP — " + e.message);
+      status("HTTP error — " + e.message);
     }
   }
 

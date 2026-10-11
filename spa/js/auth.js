@@ -4,14 +4,14 @@
 (function () {
   const { KEYCLOAK_URL, REALM, CLIENT } = window.CONFIG;
 
-  // keycloak-js est chargé par index.html <script src="…keycloak.js">
+  // keycloak-js is loaded by index.html <script src="http://localhost:8080/js/keycloak.js">
   window.kc = Keycloak({
     url: KEYCLOAK_URL,
     realm: REALM,
     clientId: CLIENT,
-    // on laisse keycloak-js gérer le PKCE + le refresh
+    // let keycloak-js handle PKCE + token refresh
   });
 
-  // si on est déjà authentifié, on charge le token sans UI
+  // if we are already authenticated, load the token without UI
   kc.init({ onLoad: "login-required", pkceMethod: "S256" });
 })();

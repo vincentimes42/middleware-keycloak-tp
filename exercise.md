@@ -2,8 +2,9 @@
 
 ## Overview
 
-Suite du TP Spring Boot (le TP1). On reprend l'api du TP1 et on remplace
-l'authentification HTTP Basic par Keycloak et le flow OAuth2 OIDC.
+This is the follow-up to the Spring Boot TP (TP1, `../springboot/`). We reuse
+the TP1 API and **replace its HTTP Basic authentication** with Keycloak via the
+OAuth2 / OIDC flow.
 
 For each step, write tests first, then implement until they pass. The tests
 you write *are part of your deliverable*.
@@ -11,9 +12,46 @@ you write *are part of your deliverable*.
 The specification describes **behaviors, contracts, and status codes**.
 It does NOT prescribe the internal implementation.
 
-> The TP1 (../springboot) is assumed done and green: CRUD, ownership,
-> versioning, GPS, metrics. This TP only changes **who the user is** and
-> how the API verifies them.
+> **Prerequisite: TP1 is done and green.** Concretely, the TP1 API
+> (`../springboot`) is running on port **8081** and passes its own Steps 1-6
+> checklists (register, CRUD, ownership, versioning, GPS, metrics) using
+> HTTP Basic authentication. If TP1 is not yet at that state, finish it
+> first (it is an independent 8h TP) before starting this one.
+>
+> This TP only changes **who the user is** and how the API verifies them.
+
+---
+
+## What is Keycloak? (one minute)
+
+**Keycloak is an open-source Identity and Access Management (IAM) server.**
+It is the *single place* that knows who the users are, how to log them in,
+and how to prove their identity to other applications.
+
+| Question | Answer |
+|---|---|
+| Where do I put the users? | **Realm** (think of a tenant / a company). This TP has one realm: `listings`. |
+| Where do I put an application that uses Keycloak? | **Client** (a "client" = one API or SPA that speaks to Keycloak). We have `listings-api` and `listings-spa`. |
+| Where do I put the users' credentials? | In a **User** object inside the realm — never in your app. |
+| How does my app say *who is calling*? | A **token** (a JWT) signed by Keycloak, carried in the `Authorization: Bearer <jwt>` header. |
+| How does my app decide *what is allowed*? | From the **claims** of the JWT (here: `sub` and `realm_access.roles`). |
+
+Three Keycloak objects you will meet in this TP:
+
+| Keycloak object | Example in this realm |
+|---|---|
+| **Realm** (tenant) | `listings` |
+| **Client** (application) | `listings-api` (confidential), `listings-spa` (public) |
+| **User** | `alice`, `bob` — each with a realm role (`seller`) |
+
+Keycloak is a **server**, not a Spring Boot starter, not a Java library. It
+talks to your app over HTTP using standard protocols:
+**OAuth2** (the grant flows), **OIDC** (the identity layer on top), and
+**JWT** (the token format). The next section walks through those three in
+two minutes.
+
+> **Mental model for the day:** *Keycloak is the "who + who allowed" server.*
+> Your Spring Boot app is the *what* server. They talk through JWTs.
 
 ---
 
@@ -101,11 +139,13 @@ Everything else (`name`, `email`, `preferred_username` …) is cosmetic.
 
 | Track | Steps |
 |---|---|
-| **Core** (required — must fit in the 8h) | 1 · 2 · 3 · 4 · 5 · 6 |
-| **Bonus** (start only when the core checklists are green) | 7 (SPA) · refresh · multi-client · logout · admin UI |
-| **Delivery** | 8 (final integration — see Step 8) |
+| **Core** (required — must fit in the 8h) | 1 · 2 · 3a · 3b · 4 · 5 |
+| **Bonus** (start only when the core checklists are green) | 6 (401/403 contracts) · 7 (SPA) · 8 (WebAuthn / custom flow) · refresh · multi-client · logout · admin UI |
+| **Delivery** | 9 (final integration — see Step 9) |
 
 Each core step's "Acceptance checklist" is your "definition of done".
+Bonus steps have their own acceptance checklists; doing them is optional
+but counts for the grade if you deliver them.
 
 ---
 
@@ -281,7 +321,7 @@ class ListingsApiJwtIntegrationTest {
 - [ ] `POST .../protocol/openid-connect/token` (password grant, `listings-api`) → 200 with `access_token` + `refresh_token`
 - [ ] The decoded payload has `iss`, `sub`, `azp`=`listings-api`, `realm_access.roles` ⊇ `["seller"]`
 - [ ] `GET .../protocol/openid-connect/certs` returns a `keys` array (RS256)
-- [ ] A bad password yields a `401` with `invalid_grant` (not a 200)
+- [ ] A bad password yields a `400` with `invalid_grant` (not a 200)
 
 ### Hints
 
@@ -293,7 +333,61 @@ class ListingsApiJwtIntegrationTest {
 
 ---
 
-## Step 3 - Turn the API into a resource server `CORE`
+## Step 3a — Declare a resource server (no behavior change) `CORE`
+
+> **User story** — *As a **platform developer**, I want the TP1 API to
+> **declare itself as a Keycloak resource server** without breaking any TP1
+> behaviour, so that I have a verified baseline before I replace the auth
+> mechanism.*
+
+### Changes to make in the TP1 (`../springboot`)
+
+| What | From (TP1) | To (this step) |
+|---|---|---|
+| `pom.xml` | `spring-boot-starter-security` only | **add** `spring-boot-starter-oauth2-resource-server` |
+| `application.yml` | (none) | `spring.security.oauth2.resourceserver.jwt.issuer-uri: http://localhost:8080/realms/listings` |
+| `SecurityConfig` | (unchanged) | (unchanged — the filter chain still runs HTTP Basic) |
+| Java classes | (unchanged) | (unchanged) |
+
+This is a **checkpoint**, not a migration. The API still runs on HTTP Basic;
+you are only *declaring the capability* for the next step.
+
+### Behavior
+
+| # | Requirement |
+|---|---|
+| 3a.1 | The API still boots, the TP1 Step 1-6 acceptance checklists still pass (no regression). |
+| 3a.2 | `pom.xml` contains the `spring-boot-starter-oauth2-resource-server` dependency. |
+| 3a.3 | `application.yml` (or `application-dev.yml`) contains `spring.security.oauth2.resourceserver.jwt.issuer-uri: http://localhost:8080/realms/listings`. |
+| 3a.4 | The JWKS endpoint for that issuer is reachable: `GET http://localhost:8080/realms/listings/protocol/openid-connect/certs` → `200` with a `keys` array. |
+| 3a.5 | A TP1 basic-auth write (e.g. `POST /auth/register` followed by `POST /listings` with `Authorization: Basic …`) still returns `201`. |
+
+### Acceptance checklist
+
+- [ ] `mvn spring-boot:run` (TP1, port 8081) — the app still boots
+- [ ] `GET http://localhost:8081/actuator/health` → `200`
+- [ ] `grep -q "spring-boot-starter-oauth2-resource-server" pom.xml` → yes
+- [ ] `grep -E "issuer-uri" src/main/resources/application*.yml` → value matches `http://localhost:8080/realms/listings`
+- [ ] All TP1 Step 1-6 acceptance tests still pass (`mvn verify`)
+- [ ] In your notebook: "I can explain *why* the API fetches its public keys from `/protocol/openid-connect/certs` before validating any JWT."
+
+### Hints
+
+- Spring Security — *OAuth2 Resource Server → JWT*:
+  <https://docs.spring.io/spring-security/reference/servlet/oauth2/web/jwt.html>
+- `issuer-uri` is the single Spring config that lets a `JwtDecoder`
+  auto-discover the **JWKS** endpoint. You do **not** build the decoder by
+  hand.
+- The JWKS URL is derived from `issuer-uri`:
+  `{issuer}/protocol/openid-connect/certs`. Verify it returns a JSON
+  `keys` array **before** you rely on it in Step 3b.
+- If the app does not boot after adding the starter, look at the
+  `NoSuchBeanDefinitionException` (or similar) — usually a conflicting
+  `SecurityFilterChain` from TP1. Read the stack trace before touching code.
+
+---
+
+## Step 3b — Switch to Bearer, drop the Basic path `CORE`
 
 > **User story** — *As a **platform developer**, I want the TP1 API to
 > **verify Keycloak JWTs** and stop using HTTP Basic, so that **identity is
@@ -301,38 +395,56 @@ class ListingsApiJwtIntegrationTest {
 
 ### Changes to make in the TP1 (`../springboot`)
 
-| What | From (TP1) | To (TP2) |
+On top of Step 3a:
+
+| What | From (3a) | To (3b) |
 |---|---|---|
-| `pom.xml` | `spring-boot-starter-security` only | **add** `spring-boot-starter-oauth2-resource-server` |
-| `SecurityConfig` | `.httpBasic(...)` | `.oauth2ResourceServer(jwt -> jwt... )` |
-| `application.yml` | (none) | `spring.security.oauth2.resourceserver.jwt.issuer-uri: http://localhost:8080/realms/listings` |
-| Auth source | local `user` table + BCrypt | the JWT (`sub` + `realm_access`) |
+| `SecurityConfig` | `.httpBasic(...)` on protected writes | `.oauth2ResourceServer(jwt -> jwt…)` on protected writes |
+| `pom.xml` | both `spring-boot-starter-security` and `spring-boot-starter-oauth2-resource-server` | unchanged |
+| `UserServiceImpl` (TP1) | BCrypt path | keep the bean, make sure **no production request path** reads it |
+| `application.yml` | `issuer-uri` set | unchanged |
+| TP1 tests | `httpBasic(...)` / `@WithMockUser` | either updated to use `Jwt` (the Step 5 style) or **`@Disabled` with a one-line comment** |
 
 ### Behavior
 
 | # | Requirement |
 |---|---|
-| 3.1 | The API rejects a request with **no** `Authorization` header on protected endpoints → `401`. |
-| 3.2 | The API rejects a token with a **wrong issuer**, **wrong audience**, or **invalid signature** → `401`. |
-| 3.3 | The API accepts a valid `listings` JWT and exposes it as the current authentication. |
-| 3.4 | `application.yml` sets `issuer-uri` to `http://localhost:8080/realms/listings` (the API then fetches the **JWKS** itself and verifies the signature). |
+| 3b.1 | A write (`POST /listings`, `PUT/DELETE /listings/{id}`) with **no** `Authorization` header → `401`. |
+| 3b.2 | A write with a token whose **issuer / audience / signature / expiry** is wrong → `401`. |
+| 3b.3 | A write with a **valid** `listings` JWT is accepted; the claims (`sub`, `realm_access.roles`) are available to the security chain. |
+| 3b.4 | `GET /listings*` stays **public** (no token needed) — same as TP1. |
+| 3b.5 | The local `user` table and BCrypt are **no longer part of any write path** (the bean may exist, but nothing calls it). |
 
 ### Acceptance checklist
 
-- [ ] `POST /listings` **without** Bearer → `401`
-- [ ] `POST /listings` with a **forged** token → `401`
-- [ ] `GET /listings` with a **valid** Bearer → `200`
-- [ ] `spring.security.oauth2.resourceserver.jwt.issuer-uri` is set in `application.yml`
-- [ ] `spring-boot-starter-oauth2-resource-server` is in `pom.xml`
+- [ ] `POST /listings` **without** Bearer → `401` (not 400, not 500)
+- [ ] `POST /listings` with a **forged** token (e.g. `iss` from a different realm) → `401`
+- [ ] `POST /listings` with the **canonical** token from
+  `docs/verification.md` §5 → `201`
+- [ ] `GET /listings` anonymous → `200` (unchanged)
+- [ ] TP1 Basic-based tests are either **updated** to use a `Jwt`
+      or `@Disabled` with the comment `// replaced by TP2 Step 3b`
+- [ ] `grep -rE "httpBasic|@WithMockUser" src/main/java` → no hit
+      (the production chain no longer uses Basic)
 
 ### Hints
 
-- Spring Security reference — *OAuth2 Resource Server → JWT*:
-  <https://docs.spring.io/spring-security/reference/servlet/oauth2/web/jwt.html>
-- `JwtDecoder` is created automatically from `issuer-uri` (it fetches JWKS).
-  You do **not** need to build it by hand.
-- Keep the `BCryptPasswordEncoder` out of any path you touch — it is now
-  unused.
+- Spring Security reference — same page as 3a.
+- In `SecurityConfig`, replace the `httpBasic(...)` clause with:
+  `.oauth2ResourceServer(jwt -> jwt.authenticationConverter(...))`
+  (or the default `JwtAuthenticationConverter` + a custom
+  `authoritiesMapper` for the `seller` role — that is Step 4 territory).
+- The `BCryptPasswordEncoder` bean can stay as a bean (Spring does not use it
+  anymore) or be removed. Either is fine — **but** make sure no
+  production path reads it.
+- A useful test:
+  `POST /auth/register` (still 200 or, if you keep TP1's behavior, 400 with
+  a clear "feature deprecated in TP2 — see Step 5" message). Do **not** let
+  it succeed and hash a password into the `user` table — that would
+  reintroduce a local password.
+- If you see a `401` with no `WWW-Authenticate: Bearer` hint, the
+  `oauth2ResourceServer` config is probably missing on that request matcher.
+
 ---
 
 ## Step 4 - Map claims to authorizations `CORE`
@@ -404,7 +516,7 @@ class ListingsApiJwtIntegrationTest {
 
 ---
 
-## Step 6 - 401 / 403 contracts `CORE`
+## Step 6 - 401 / 403 contracts `BONUS`
 
 > **User story** — *As an **API client**, I want a clear `401` (no/bad token)
 > and a clear `403` (right user, wrong role) with a consistent `WWW-Authenticate`
@@ -462,6 +574,55 @@ A starter is provided in `spa/` (keycloak-js + `fetch`). See
 
 ---
 
+## Step 8 - Beyond the token: an authenticator and a custom authentication flow `BONUS`
+
+> **User story** — *As a **platform developer**, I want to **add a second
+> factor (FIDO2/WebAuthn)** and to **rework the login flow itself** (a
+> password step then a conditional WebAuthn step) purely in Keycloak, so that
+> I experience identity as a **configurable platform** — not as a fixed
+> username/password check — and to see it change the JWT.*
+
+This is the step that reveals the other face of Keycloak. So far you have
+*consumed* tokens; here you **produce the authentication policy**. It is done
+entirely through the **admin console** and/or **`realm.json`** (no Java), which
+keeps it achievable inside the session.
+
+### Behavior
+
+| # | Requirement |
+|---|---|
+| 8.1 | The realm `listings` **enables FIDO2 / WebAuthn** (a user can register a platform authenticator). |
+| 8.2 | The login flow is **customized**: a `Password` step followed by a **conditional WebAuthn** (or OTP) step — i.e. a multi-factor flow — visible to `alice`. |
+| 8.3 | Completing the flow changes the **token**: either the `acr` claim reflects the method used (e.g. `password` vs `webauthn`/`otp`), or `auth_time`/`sso` reflects the new session. State exactly which claim you rely on and why. |
+| 8.4 | A user without a registered authenticator still logs in (the WebAuthn step is **conditional**), so the core stays usable. |
+| 8.5 | Everything works from the browser (console) **and/or** `realm.json`; do not hard-code anything in the Java code. |
+
+### Acceptance checklist
+
+- [ ] FIDO2/WebAuthn is enabled for the realm (visible in the admin console → Authentication → flows)
+- [ ] `alice` can register an authenticator and the login flow now includes a second step
+- [ ] After the full flow, the JWT shows the higher assurance (`acr`/method) or a fresh `auth_time`
+- [ ] A new user (no authenticator) still completes login (conditional step skipped)
+- [ ] The change is reproducible via `realm.json` (or documented admin-console steps) — no code change
+
+### Hints
+
+- Admin console → **Realms → `listings` → Authentication → Flows**: duplicate
+  the `browser` flow, add a `WebAuthn` step (or a `Conditional OTP`) after
+  `Password`, and make it **conditional** (e.g. "webauthn conditional").
+- Enable FIDO2 under **Authentication → Flows → configure the WebAuthn
+  authenticator** (Relying Party Id, etc.).
+- `acr` (Authentication Context Class Reference) is the OIDC claim describing
+  *how* the subject was authenticated — the natural thing to assert on.
+- Re-export the realm (**Export → full**) to see the flow serialized in the
+  JSON, then import it back — that is your "no-code, reproducible" proof.
+- Keep password-only as the **fallback** flow for scripts (`listings-api`) so
+  core tests are unaffected; bind the WebAuthn flow to the browser client.
+- (Out of scope, "to go further") a **custom authenticator Provider** written
+  in Java and imported into Keycloak — mention it, do not build it in this TP.
+
+---
+
 ## Bonus (start only when the core checklist is green)
 
 - **Refresh**: the SPA / client renews the access token with the
@@ -469,23 +630,23 @@ A starter is provided in `spa/` (keycloak-js + `fetch`). See
 - **Multi-client**: one identity realm serves both `listings-api` (script)
   and `listings-spa` (browser) — keep both working from the same realm.
 - **Logout**: front-channel logout + Keycloak session invalidation.
-- **Admin role**: a user with the realm `admin` sees an `GET /listings` count
+- **Admin role**: a user with the realm `admin` sees a `GET /listings` count
   or other admin-only endpoint; a seller does not (403).
 - **Introspection**: the API validates a token via the OIDC **introspection
   endpoint** instead of (or in addition to) local JWT verification.
 
 ---
 
-## Step 8 - Final Integration
+## Step 9 - Final Integration
 
 | # | Requirement |
 |---|---|
-| 11.1 | `docker compose up -d` (Keycloak + Postgres) is **healthy**; the realm `listings` is present. |
-| 11.2 | `mvn clean verify` (TP1) is **green** — core checklists pass; add `-DwithKeycloak` to also run the integration tests against the real Keycloak. |
-| 11.3 | The README documents: how to start the stack, how to get a token, the 401/403 contracts, claims used, and your technical choices. |
-| 11.4 | The local `user` table / BCrypt / `/auth/register` are no longer used for authentication. |
-| 11.5 | No `TODO` / stubs remain in production code. Total test count (unit + integration) keeps growing on top of TP1. |
-| 11.6 | Oral: 10 min (OAuth2/OIDC flow, JWT verification, ownership via `sub`, demo) + 5 min Q&A. |
+| 9.1 | `docker compose up -d` (Keycloak + Postgres) is **healthy**; the realm `listings` is present. |
+| 9.2 | `mvn clean verify` (TP1) is **green** — core checklists pass; add `-DwithKeycloak` to also run the integration tests against the real Keycloak. |
+| 9.3 | The README documents: how to start the stack, how to get a token, the 401/403 contracts, claims used, the (bonus) authentication flow, and your technical choices. |
+| 9.4 | The local `user` table / BCrypt / `/auth/register` are no longer used for authentication. |
+| 9.5 | No `TODO` / stubs remain in production code. Total test count (unit + integration) keeps growing on top of TP1. |
+| 9.6 | Oral: 10 min (OAuth2/OIDC flow, JWT verification, ownership via `sub`, multi-factor/flow demo) + 5 min Q&A. |
 
 ---
 
@@ -497,7 +658,6 @@ A starter is provided in `spa/` (keycloak-js + `fetch`). See
 | `docker compose up` | Keycloak + Postgres healthy, realm imported |
 | `mvn clean verify` (TP1) | green; `-DwithKeycloak` runs the integration tests |
 | README.md | stack run, token, 401/403, claims, choices |
-| Oral | 10 min + Q&A |
 
 ---
 
@@ -522,9 +682,26 @@ A starter is provided in `spa/` (keycloak-js + `fetch`). See
 | `http://localhost:8080/admin` | admin console (admin/admin) |
 | `http://localhost:8080/realms/listings/account/` | user console (alice/secret) |
 
-## Appendix C - Keycloak CLI
+## Appendix C - Export / import a realm (Step 8, reproducible config)
 
+The Step 8 authentication flow is built in the admin console. To make it
+**reproducible from code** (and to "prove" it is no-code configuration), export
+the realm and commit the JSON:
+
+```bash
+# 1) in the admin console: Realms -> listings -> Export -> Full -> Download
+#    (or via the admin REST API:)
+curl -fsS http://localhost:8080/admin/realms/listings \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  --output realm/listings-after-step8.json
+
+# 2) to re-import it from scratch (e.g. after `docker compose down -v`):
+docker compose down -v && docker compose up -d
+docker compose exec keycloak /opt/keycloak/bin/kc.sh import \
+  --file /opt/keycloak/data/import/listings-after-step8.json --overwrite \
+  --realm listings
 ```
-docker compose exec keycloak /opt/keycloak/bin/kc.sh build
-docker compose exec keycloak /opt/keycloak/bin/kc.sh import --file /opt/keycloak/data/import/realm.json --overwrite
-```
+
+> The imported realm serializes the **flows** (`browser`, `browser-webauthn`,
+> …), the **authenticators** (WebAuthn configuration) and the **conditional
+> actions** — that is the whole authentication policy as data.
