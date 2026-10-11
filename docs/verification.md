@@ -6,22 +6,24 @@ realm is imported, and that we can obtain a valid JWT for `alice`.
 ## 1) Prerequisites
 
 - `docker compose` available (`docker compose version`).
-- Port 8080 free (Keycloak) and 5433 free (exposed Postgres).
+- The base project (`../springboot/docker-compose.yml`) already up — it runs
+  the API on `8080` (see README "Run").
+- Port `8081` free (Keycloak) and `5436` free (Keycloak's Postgres).
 
 ## 2) Start
 
 ```bash
-cd keycloak
-docker compose up -d
+cd ../springboot && docker compose up -d   # base: API (8080) + its Postgres (5435)
+cd ../keycloak  && docker compose up -d    # this: Keycloak (8081) + its Postgres (5436)
 ```
 
-`depends_on` waits for `postgres` to become `healthy` before starting
+`depends_on` waits for `keycloak-postgres` to become `healthy` before starting
 `keycloak`. Once the app is ready, the healthcheck turns `healthy`.
 
 Tail:
 
 ```bash
-docker compose ps              # tp-keycloak  healthy / tp-postgres  healthy
+docker compose ps              # keycloak healthy / keycloak-postgres healthy
 docker compose logs -f keycloak
 ```
 
@@ -29,11 +31,11 @@ docker compose logs -f keycloak
 
 | URL | Purpose |
 |---|---|
-| <http://localhost:8080/admin> | Admin console (login `admin` / `admin`) |
-| <http://localhost:8080/realms/listings/account/> | User console (`alice` / `secret`) |
-| <http://localhost:8080/realms/listings/.well-known/openid-configuration> | OIDC metadata |
-| <http://localhost:8080/realms/listings/protocol/openid-connect/certs> | JWKS (public keys) |
-| <http://localhost:8080/realms/listings/protocol/openid-connect/token> | Token endpoint |
+| <http://localhost:8081/admin> | Admin console (login `admin` / `admin`) |
+| <http://localhost:8081/realms/listings/account/> | User console (`alice` / `secret`) |
+| <http://localhost:8081/realms/listings/.well-known/openid-configuration> | OIDC metadata |
+| <http://localhost:8081/realms/listings/protocol/openid-connect/certs> | JWKS (public keys) |
+| <http://localhost:8081/realms/listings/protocol/openid-connect/token> | Token endpoint |
 
 ## 4) Roles and accounts
 
@@ -49,7 +51,7 @@ Accounts / roles are created by `realm/realm.json`.
 
 ```bash
 # confidential client: listings-api (secret: listings-api-secret)
-curl -fsS -X POST http://localhost:8080/realms/listings/protocol/openid-connect/token \
+curl -fsS -X POST http://localhost:8081/realms/listings/protocol/openid-connect/token \
   -d grant_type=password \
   -d client_id=listings-api \
   -d client_secret=listings-api-secret \
@@ -65,7 +67,7 @@ Expected response: a JSON with `access_token`, `refresh_token`, `expires_in`,
 The token is `header.payload.signature` in base64url. To read the `payload`:
 
 ```bash
-ACCESS=$(curl -fsS -X POST http://localhost:8080/realms/listings/protocol/openid-connect/token \
+ACCESS=$(curl -fsS -X POST http://localhost:8081/realms/listings/protocol/openid-connect/token \
   -d grant_type=password -d client_id=listings-api -d client_secret=listings-api-secret \
   -d username=alice -d password=secret | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
 python3 - <<PY
@@ -80,7 +82,7 @@ Claims that matter for the Spring Boot application (see `exercise.md`):
 
 | claim | example value |
 |---|---|
-| `iss` | `http://localhost:8080/realms/listings` |
+| `iss` | `http://localhost:8081/realms/listings` |
 | `sub` | the Keycloak `uuid` of the user (stable, unique) |
 | `azp` | `listings-api` |
 | `preferred_username` | `alice` |
@@ -88,8 +90,8 @@ Claims that matter for the Spring Boot application (see `exercise.md`):
 | `realm_access.roles` | `["seller"]` |
 | `scope` | `email profile` |
 
-> `sub` is the stable key that replaces the TP1 `user` table — it is the value
-> expected in `listing.owner_sub`.
+> `sub` is the stable key that replaces the TP1 `app_user` table — it is the
+> value expected in `listing.owner_sub`.
 
 > **Note:** the `scope` claim lists the standard OIDC scopes (profile, email,
 > ...). The realm roles live in a separate `realm_access.roles` array — that
@@ -118,7 +120,7 @@ and the demo accounts return to their initial state.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `tp-keycloak` restarts | `postgres` not ready | check `docker compose logs postgres` |
+| `keycloak` restarts | `keycloak-postgres` not ready | check `docker compose logs keycloak-postgres` |
 | `401 invalid_client` | wrong `client_secret` | use `listings-api-secret` |
 | `sub` missing from token | `basic` scope missing | `basic` + `roles` are already in `realm.json` |
 | `404 /health/ready` | 26.x health path not mounted | don't rely on it; test `/realms/listings/.well-known/openid-configuration` |

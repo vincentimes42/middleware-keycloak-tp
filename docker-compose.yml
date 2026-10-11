@@ -1,111 +1,134 @@
 # =====================================================================
-#  TP Keycloak — identity stack
+#  TP Keycloak — attaches to the SHARED `middleware` network (base:
+#  ../springboot/docker-compose.yml, which runs listings-api +
+#  listings-postgres). This project adds:
+#       - keycloak          -> host 8081 (OIDC / admin / health)
+#       - keycloak-postgres -> host 5436 (Keycloak's store)
 #
-#  This compose starts ONLY the identity provider and its persistence.
-#  The Spring Boot application (TP1, ../springboot) is started separately,
-#  on the host, with `mvn spring-boot:run` (same command as TP1).
+#  Port map (host):
+#       listings-api         8080   (base — no change for this TP; Keycloak moves)
+#       listings-postgres    5435   (base — no change)
+#       keycloak             8081   (this file — moved to keep 8080 for the API)
+#       keycloak-postgres    5436   (this file)
 #
-#  Full instructions: see `../README.md` and `exercise.md`.
+#  Network + resource sharing:
+#    * The `middleware` network is created by the base project. This file
+#      ATTACHES to it. Pinning it with `name: middleware` means both projects
+#      use the same global Docker network, so the API and Keycloak can
+#      reach each other by container name (listings-api <-> keycloak).
+#    * Services discover each other by their `container_name`
+#      (see the base file), NOT by `localhost`.
 #
-#  Start            : docker compose up -d
-#  Health check     : curl -fsS http://localhost:8080/health/ready
-#  Stop (keep data) : docker compose down
-#  Reset (wipe)     : docker compose down -v     (wipes Postgres + Keycloak)
+#  BEFORE YOU RUN: read "Run" in ../keycloak/README.md. It tells you the
+#  ONE small edit to make in ../springboot/docker-compose.yml (point the API
+#  at Keycloak's JWKS over the network name; the API's host port stays 8080).
+#  The exact snippet is in the box at the bottom of this file.
+#
+#  Run order (base owns the API, so it is always there first):
+#      $ cd ../springboot && docker compose up -d   # base: API on 8080 + pg on 5435
+#      $ cd ..../keycloak && docker compose up -d   # this: Keycloak on 8081 + pg on 5436
+#  Health (API) : curl -fsS http://localhost:8080/actuator/health
+#  Health (KC)  : curl -fsS http://localhost:8081/health/ready
 # =====================================================================
 
-name: keycloak-listings-tp
+name: keycloak-tp
 
 networks:
-  keycloak-net:
-    driver: bridge
+  middleware:
+    name: middleware      # SAME global network the base project creates
 
 volumes:
-  kc-data:   # data Keycloak (sessions, cache, ...)
-  pg-data:   # data Postgres (realm, clients, users)
+  kc-data:
+  keycloak-pgdata:
 
 services:
 
-  # --------------------------------------------------------------------
-  #  Postgres 16 — persistance de Keycloak (realm, clients, users)
-  #
-  #  NB: the TP1 Spring Boot application keeps using SQLite
-  #  (see ../springboot/application.yml). This Postgres is Keycloak-only.
-  # --------------------------------------------------------------------
-  postgres:
-    image: postgres:16
-    container_name: tp-postgres
-    environment:
-      POSTGRES_DB: keycloak
-      POSTGRES_USER: keycloak
-      POSTGRES_PASSWORD: keycloak
-    ports:
-      # Host 5433 -> container 5432: keeps 5432 free in case the student
-      # is running their own Postgres (pgadmin, local psql, etc.)
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
-    volumes:
-      - pg-data:/var/lib/postgresql/data
-    networks: [keycloak-net]
-
-  # --------------------------------------------------------------------
-  #  Keycloak 26.8
-  #
-  #  - start-dev : no master password, no TLS (academic use only).
-  #  - --import-realm : at first boot, Keycloak imports every `*.json`
-  #    found in /opt/keycloak/data/import/  -> that is our `listings`
-  #    realm. Strategy IGNORE_EXISTING: if the realm already exists on
-  #    restart, it is kept.
-  #
-  #  - admin console : http://localhost:8080/admin  (admin/admin)
-  #  - health        : http://localhost:8080/health/ready
-  #  - issuer        : http://localhost:8080/realms/listings
-  #
-  #  If you modify realm.json, either:
-  #    (a) reset with `docker compose down -v && docker compose up -d`
-  #        (Keycloak data is lost), or
-  #    (b) edit through the admin console at http://localhost:8080/admin
-  # --------------------------------------------------------------------
+  # ------------------------------------------------------------------
+  #  Keycloak 26.8 — identity provider
+  #  start-dev: no master admin password, no TLS (academic use only).
+  #  --import-realm: imports every *.json in /opt/keycloak/data/import
+  #  at first boot (that is our `listings` realm).
+  #  Host port 8081 chosen so the API can keep 8080 (both on the shared net,
+  #  no collision). Internal port stays 8080 (Keycloak default).
+  #  issuer        : http://localhost:8081/realms/listings
+  #  admin console : http://localhost:8081/admin  (admin/admin)
+  #  user console  : http://localhost:8081/realms/listings/account/  (alice/secret)
+  #  The app (listings-api) reaches us over the network name `keycloak`
+  #  on its INTERNAL port 8080 (not the host 8081).
+  # ------------------------------------------------------------------
   keycloak:
     image: keycloak/keycloak:26.8
-    container_name: tp-keycloak
+    container_name: keycloak          # stable name for cross-network DNS
     command: >
       start-dev
       --http-relative-path=/
       --import-realm
     environment:
-      # bootstrap admin (utilisable via l'admin REST API / l'admin console)
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-      # datasource (postgres)
       KC_DB: postgres
-      KC_DB_URL: "jdbc:postgresql://postgres:5432/keycloak"
+      KC_DB_URL: "jdbc:postgresql://keycloak-postgres:5432/keycloak"
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: keycloak
-      # health endpoint
       KC_HEALTH_ENABLED: "true"
     ports:
-      - "8080:8080"   # HTTP : OIDC, admin console, health
+      - "8081:8080"   # host 8081 -> container 8080 (OIDC, admin console, health)
     volumes:
-      # Mount the `./realm` directory (which contains realm.json)
-      # read-only into Keycloak's import folder. A directory bind-mount
-      # (not a single file) is reliable across all overlay drivers.
+      # Bind our ./realm dir (realm.json) read-only into the import folder.
       - ./realm:/opt/keycloak/data/import:ro
       - kc-data:/opt/keycloak/data
     depends_on:
-      postgres:
+      keycloak-postgres:
         condition: service_healthy
-    networks: [keycloak-net]
+    networks: [middleware]
     healthcheck:
-      # The Keycloak image does not ship `curl`. We do a plain TCP probe
-      # on port 8080: if it is open the app is ready to serve (Keycloak
-      # closes the port until bootstrap completes).
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080 && exit 0' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
+
+  # ------------------------------------------------------------------
+  #  PostgreSQL 16 — Keycloak persistence (realm, clients, users).
+  #  Kept SEPARATE from the API's listings-postgres (host 5435). Host 5436.
+  # ------------------------------------------------------------------
+  keycloak-postgres:
+    image: postgres:16
+    container_name: keycloak-postgres
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+    ports:
+      - "5436:5432"
+    volumes:
+      - keycloak-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [middleware]
+
+# =====================================================================
+#  REQUIRED EDIT in ../springboot/docker-compose.yml  (see README "Run")
+#
+#  In the `listings-api` service, add this to `environment:` — this is
+#  now the ONLY required edit for the Keycloak TP (the host port stays
+#  8080, so no `ports` change is needed).
+#
+#      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "http://localhost:8081/realms/listings"
+#      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "http://keycloak:8080/realms/listings/protocol/openid-connect/certs"
+#
+#  WHY the split (2 different hostnames):
+#    * issuer = what a browser / client sees (Host: localhost). Keycloak
+#      copied the Host header into the JWT, so iss = http://localhost:8081/...
+#      and the API must verify with that same issuer.
+#    * JWKS   = fetched FROM INSIDE the API container. `localhost` there
+#      is the container itself, so the fetch must go through the network
+#      name `keycloak` on its internal port 8080.
+#
+#  Put issuer in application.yml (greppable); put JWKS-SET-URI here (via
+#  the compose env) because it must use the network name, not localhost.
+# =====================================================================

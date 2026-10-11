@@ -12,7 +12,7 @@ No framework. No dependency to install (everything runs with vanilla JS +
 For auth we use the **official Keycloak client**
 [`keycloak-js`](https://github.com/keycloak/keycloak-js), served directly by
 the `keycloak/keycloak:26.8` image:
-`http://localhost:8080/js/keycloak.js`. No `npm`, no `node_modules`.
+`http://localhost:8081/js/keycloak.js`. No `npm`, no `node_modules`.
 
 ## Run
 
@@ -41,14 +41,13 @@ CMD ["nginx", "-g", "daemon off;"]
 
 | key | expected value |
 |---|---|
-| `KEYCLOAK_URL` | `http://localhost:8080` |
+| `KEYCLOAK_URL` | `http://localhost:8081` |
 | `REALM` | `listings` |
 | `CLIENT` | `listings-spa` (the **public** client defined in `realm.json`) |
-| `API` | `http://localhost:8081` (TP1 published on port 8081 via docker) |
+| `API` | `http://localhost:8080` (TP1 published on port 8080 via docker) |
 
-> NB: in the academic environment the API defaults to
-> `http://localhost:8081` because port `8080` is reserved for Keycloak. If you
-> run TP1 **locally on 8080**, just change `API` to `http://localhost:8080`.
+> NB: the API stays on `http://localhost:8080` for every TP (Keycloak moved to
+> `8081`, so it never collides) — see `js/config.js`.
 
 ## Flow
 
@@ -71,6 +70,6 @@ CMD ["nginx", "-g", "daemon off;"]
 ## If it does not work
 
 1. Check that `docker compose ps` is healthy.
-2. Open `http://localhost:8080/realms/listings/protocol/openid-connect/authorize?client_id=listings-spa&redirect_uri=http://localhost:3000/auth/callback&response_type=code` — if the login page does not appear, CORS or `webOrigins` is not set correctly in `realm.json`.
+2. Open `http://localhost:8081/realms/listings/protocol/openid-connect/authorize?client_id=listings-spa&redirect_uri=http://localhost:3000/auth/callback&response_type=code` — if the login page does not appear, CORS or `webOrigins` is not set correctly in `realm.json`.
 3. Check the browser console (403 = wrong role, 401 = no token).
-4. Check that the TP1 Spring Boot API is running on `localhost:8081`.
+4. Check that the TP1 Spring Boot API is running on `localhost:8080`.

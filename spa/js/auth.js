@@ -4,7 +4,7 @@
 (function () {
   const { KEYCLOAK_URL, REALM, CLIENT } = window.CONFIG;
 
-  // keycloak-js is loaded by index.html <script src="http://localhost:8080/js/keycloak.js">
+  // keycloak-js is loaded by index.html <script src="http://localhost:8081/js/keycloak.js">
   window.kc = Keycloak({
     url: KEYCLOAK_URL,
     realm: REALM,
