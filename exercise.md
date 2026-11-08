@@ -8,7 +8,7 @@ OAuth2 / OIDC flow.
 
 **How a step is validated:** by what you can *show* — a `curl` returns the
 right status code / body / header, a token carries the expected claims, the
-stack is `healthy`. Each step's **acceptance checklist** is your definition of
+stack is `healthy`. Each step's **`Verify` section** is your definition of
 "done", and it is what gets graded. You do it with `curl` and the running
 stack, not with a test suite.
 
@@ -24,11 +24,11 @@ It does NOT prescribe the internal implementation.
 > **Prerequisite: TP1 is done and green.** Concretely, the TP1 API
 > (`../springboot`) passes its own core checklists (register, CRUD, ownership,
 > versioning, metrics) using HTTP Basic authentication.
-> For this TP the API runs on port **8080** (unchanged) with Keycloak on
-> **8081** — read [`README.md` "Run"](README.md#run) for the shared-network
-> setup and the one required edit in `../springboot/docker-compose.yml`
-> (issuer/JWKS env; no port change). If TP1 is not yet at that state, finish
-> it first (it is an independent 8h TP) before starting this one.
+ > For this TP the API runs on port **8080** (unchanged) with Keycloak on
+ > **8081** — read **README → Run** for the shared-network setup and the one
+ > required edit in `../springboot/docker-compose.yml`
+ > (issuer/JWKS env; no port change). If TP1 is not yet at that state, finish
+ > it first (it is an independent 8h TP) before starting this one.
 >
 > This TP only changes **who the user is** and how the API verifies them.
 
@@ -152,11 +152,11 @@ Everything else (`name`, `email`, `preferred_username` …) is cosmetic.
 | Track | Steps |
 |---|---|
 | **Core** (required — must fit in the 8h) | 1 · 2 · 3a · 3b · 4 · 5 |
-| **Bonus** (start only when the core checklists are green) | 6 (401/403 contracts) · 7 (SPA) · 8 (WebAuthn / custom flow) · refresh · multi-client · logout · admin UI |
+| **Bonus** (start only when the core `Verify` sections are green) | 6 (401/403 contracts) · 7 (SPA) · 8 (WebAuthn / custom flow) · refresh · multi-client · logout · admin UI |
 | **Delivery** | 9 (final integration — see Step 9) |
 
-Each core step's "Acceptance checklist" is your "definition of done".
-Bonus steps have their own acceptance checklists; doing them is optional
+Each core step's `Verify` section is your "definition of done".
+Bonus steps have their own `Verify` section; doing them is optional
 but counts for the grade if you deliver them.
 
 ---
@@ -207,384 +207,425 @@ only, `@WebMvcTest`), **Integration** (real stack against the running Keycloak,
 
 ---
 
-## Step 1 - Bring up the stack `CORE`
+## Step 1 — Bring up the stack   CORE
 
-> **User story** — *As a **developer**, I want the Keycloak identity stack to
-> be **running and verified**, so that **the API and the SPA can rely on a
-> real issuer** before I change any application code.*
+**Outcome** — The Keycloak identity stack is **running and verified**:
+**Keycloak (26.8)** + **Postgres (16)** are healthy, the realm **`listings`**
+is imported from `realm/realm.json`, and the OIDC metadata + JWKS + account +
+admin consoles are reachable. The API and the SPA can now rely on a **real
+issuer** before any application code changes.
 
-> **Before this step:** the TP1 base must be up on **8080**
-> (`cd ../springboot && docker compose up -d`, health `http://localhost:8080/actuator/health`),
-> and the one required base edit (issuer + JWKS env in `../springboot/docker-compose.yml`)
-> must be applied — see [`README.md` → Run](README.md#run).
+### Build it
+> **Pre-req** — the TP1 base is up on `8080` (TP1's `docker compose up`),
+> and the one required base edit (issuer + JWKS env) from **README → Run §0**
+> is applied.
 
-### Behavior
+1. **Start** the identity stack in this repo:
+   `cd "$KC_DIR" && docker compose up -d`.
+2. **Wait** for `keycloak` + `keycloak-postgres` to become **healthy**
+   (`docker compose -f <compose> logs -f keycloak` to watch the realm import).
+3. **Verify** the realm, the OIDC metadata, and the consoles (the Verify list).
 
-| # | Requirement |
-|---|---|
-| 1.1 | `docker compose up -d` starts **Keycloak (26.8)** and **Postgres (16)**, both `healthy`. |
-| 1.2 | The realm **`listings`** is imported (it is created automatically from `realm/realm.json`). |
-| 1.3 | The OIDC metadata `GET /realms/listings/.well-known/openid-configuration` returns `200` with `issuer = http://localhost:8081/realms/listings`. |
-| 1.4 | The public endpoints are reachable: JWKS, the `account` console, the admin console. |
+### Expected behavior
+- `docker compose ps` shows `keycloak` and `keycloak-postgres` **healthy**;
+  `listings-api` (base) is `Up` on `8080`.
+- The realm **`listings`** exists (imported automatically from
+  `realm/realm.json`).
+- OIDC metadata
+  `GET /realms/listings/.well-known/openid-configuration` → **200** with
+  `issuer = http://localhost:8081/realms/listings`.
+- Public endpoints reachable: **JWKS**, the **account** console, the **admin**
+  console.
 
-### Acceptance checklist
+### Verify
+- [ ] `cd "$KC_DIR" && docker compose ps` shows `keycloak` and `keycloak-postgres` **healthy**; `cd "$TP1_DIR" && docker compose ps` shows `listings-api` `Up` on 8080
+- [ ] `curl -fsS http://localhost:8081/realms/listings/.well-known/openid-configuration` → 200, `issuer` matches
+- [ ] the list of realms (admin API) includes `listings`
+- [ ] you can log in as `alice` / `secret` on the account console
 
-- [ ] `docker compose ps` (from `keycloak/`) shows `keycloak` and `keycloak-postgres` **healthy**; `listings-api` (from the base, `../springboot`) is `Up` on 8080
-- [ ] `GET .../realms/listings/.well-known/openid-configuration` → 200, `issuer` matches
-- [ ] The list of realms (via admin API) includes `listings`
-- [ ] You can log in as `alice` / `secret` on the account console
-
-### Hints
-
-- Start from [`README.md` → Run](README.md#run), then wait for `docker compose ps`
-  to show both `keycloak` and `keycloak-postgres` `healthy`
-  (`docker compose logs -f keycloak` to watch startup + import).
-- Full verification walkthrough (URLs, `curl`, reading the JWT):
-  [`docs/verification.md`](docs/verification.md).
+### If you are stuck
+- Start from **README → Run**, then wait for `docker compose ps` to show both `keycloak` and `keycloak-postgres` healthy (`docker compose logs -f keycloak` to watch startup + import).
+- If the realm is missing, the **import** failed — tail the `keycloak` logs for the `import` line and confirm `realm/realm.json` is mounted.
+- Full walkthrough (URLs, `curl`, reading the JWT): [`docs/verification.md`](docs/verification.md).
 
 ---
 
-## Step 2 - Understand the flow (token + JWT) `CORE`
+## Step 2 — Understand the flow (token + JWT)   CORE
 
-> **User story** — *As a **developer**, I want to **obtain a token** for
-> `alice` and **read the claims**, so that I **know exactly what the API will
-> receive** and can design the resource-server rules around it.*
+**Outcome** — You can **obtain a token** for `alice` (confidential client
+`listings-api`, password grant), **decode the JWT**, and **read the claims**
+the API will receive — `iss`, `sub`, `azp`, `preferred_username`, and
+`realm_access.roles` ⊇ `["seller"]` — with a **`refresh_token`** and a **JWKS**
+endpoint that verifies the signature (RS256). A **bad password → 400
+`invalid_grant`**. No Java involved — this is **pure protocol**.
 
-### Behavior
+### Build it
+> This step is **read-only**: you **run the `curl`s** (no code, no config).
+> The canonical commands are in [`docs/verification.md` §5 / §6](docs/verification.md).
 
-| # | Requirement |
-|---|---|
-| 2.1 | Using the confidential client **`listings-api`** (secret `listings-api-secret`) with the **password grant**, the API returns an `access_token` for `alice`. |
-| 2.2 | Decoding the `access_token`, the **payload** carries at least: `iss` (=`http://localhost:8081/realms/listings`), `sub` (a stable UUID), `azp` (=`listings-api`), `preferred_username`, and `realm_access.roles` containing `seller`. |
-| 2.3 | A **`refresh_token`** is returned (the client can renew the access token without re-authenticating). |
-| 2.4 | The JWKS endpoint serves the **public key(s)** that verify the token signature (RS256). |
+1. **Obtain** an access token for `alice` using the confidential client
+   `listings-api` (secret `listings-api-secret`) with the **password grant**.
+2. **Decode** the `access_token` (base64url one-liner) and **read** the
+   payload claims.
+3. **Confirm** the `refresh_token` is returned (the client can renew without
+   re-authenticating).
+4. **Read** the JWKS endpoint and confirm it serves the RS256 public key(s).
+5. **Try a bad password** and confirm it returns `400 invalid_grant`.
 
-### Acceptance checklist
+### Expected behavior
+- The token **payload** carries: `iss` (= `http://localhost:8081/realms/listings`),
+  `sub` (a stable UUID), `azp` (= `listings-api`), `preferred_username`, and
+  `realm_access.roles` **containing `seller`**.
+- A **`refresh_token`** is present (used to renew the access token).
+- The **JWKS** endpoint serves the **public key(s)** that verify the signature
+  (RS256) — this is what the API will use in Step 3b.
+- `basic` and `roles` are already the **default client scopes** of
+  `listings-api`, so a plain request already gets `sub` + `realm_access`.
 
-- [ ] `docs/verification.md` **§5 (Obtain a token)** and **§6 (Read the JWT)** both pass: `access_token` + `refresh_token` present; decoded payload has `iss`, `sub`, `azp`=`listings-api`, `realm_access.roles` ⊇ `["seller"]`; JWKS has a `keys` array (RS256)
+### Verify
+- [ ] [`docs/verification.md` §5](docs/verification.md) (Obtain a token) + [§6](docs/verification.md) (Read the JWT) both pass: `access_token` + `refresh_token` present; payload has `iss`, `sub`, `azp=listings-api`, `realm_access.roles ⊇ ["seller"]`; JWKS has a `keys` array (RS256)
 - [ ] A bad password yields a `400` with `invalid_grant` (not a 200)
 
-### Hints
-
-- Walkthrough of every command: [`docs/verification.md`](docs/verification.md)
-  (sections "Obtain a token" and "Read the JWT").
-- `basic` and `roles` scope are already the **default client scopes** of
-  `listings-api`, so a plain request already gets `sub` and `realm_access`.
-- Decode the payload with the one-liner in `docs/verification.md` (base64url).
+### If you are stuck
+- The exact commands + the base64url decode one-liner are in [`docs/verification.md` §5 / §6](docs/verification.md).
+- If you see **no** `realm_access` in the payload, the client is missing the **`roles`** scope — but it is already the default of `listings-api`, so the usual cause is using a **different** client (a public one) that lacks the scope.
 
 ---
 
-## Step 3a — Declare a resource server (no behavior change) `CORE`
+## Step 3a — Declare a resource server (no behavior change)   CORE
 
-> **User story** — *As a **platform developer**, I want the TP1 API to
-> **declare itself as a Keycloak resource server** without breaking any TP1
-> behaviour, so that I have a verified baseline before I replace the auth
-> mechanism.*
+**Outcome** — The TP1 API **declares itself as a Keycloak resource server**
+(oauth2-resource-server starter + `issuer-uri`) **without changing any
+behavior**: the app still boots on HTTP Basic, all core TP1 checklists still
+pass, and the JWKS endpoint is reachable. This is a **checkpoint, not a
+migration** — you are only *declaring the capability* for Step 3b.
 
-### Changes to make in the TP1 (`../springboot`)
+### Build it
+**In the TP1 repo (`../springboot`)**:
+1. **Add** `spring-boot-starter-oauth2-resource-server` to `pom.xml`.
+2. **Add** `spring.security.oauth2.resourceserver.jwt.issuer-uri:
+   http://localhost:8081/realms/listings` to `application.yml`.
+3. **Leave** `SecurityConfig` and all Java classes **unchanged** — the filter
+   chain **still runs HTTP Basic**. (This is the "no behavior change" part.)
+4. **Rebuild + restart** the app
+   (`cd "$TP1_DIR" && mvn clean verify && docker compose up -d --build
+   listings-api`) and confirm the baseline is intact.
 
-| What | From (TP1) | To (this step) |
-|---|---|---|
-| `pom.xml` | `spring-boot-starter-security` only | **add** `spring-boot-starter-oauth2-resource-server` |
-| `application.yml` | (none) | `spring.security.oauth2.resourceserver.jwt.issuer-uri: http://localhost:8081/realms/listings` |
-| `SecurityConfig` | (unchanged) | (unchanged — the filter chain still runs HTTP Basic) |
-| Java classes | (unchanged) | (unchanged) |
+### Expected behavior
+- The API **still boots**; the core TP1 checklists (1·2·3·5·6·8) **still pass**
+  (no regression).
+- `pom.xml` now contains
+  `spring-boot-starter-oauth2-resource-server`.
+- `application.yml` (or `application-dev.yml`) sets
+  `…oauth2.resourceserver.jwt.issuer-uri: http://localhost:8081/realms/listings`.
+- The JWKS endpoint for that issuer is reachable:
+  `GET http://localhost:8081/realms/listings/protocol/openid-connect/certs` →
+  **200** with a `keys` array.
+- A **Basic-auth** write (`POST /auth/register` then `POST /listings` with
+  `Authorization: Basic …`) **still returns `201`** — the behavior is
+  intentionally **unchanged**.
 
-This is a **checkpoint**, not a migration. The API still runs on HTTP Basic;
-you are only *declaring the capability* for the next step.
+### Verify
+- [ ] `cd "$TP1_DIR" && docker compose ps` — the app still boots on **8080**; `curl -fsS http://localhost:8080/actuator/health` → 200
+- [ ] `grep -q "spring-boot-starter-oauth2-resource-server" "$TP1_DIR/pom.xml"` → yes
+- [ ] `grep -E "issuer-uri" "$TP1_DIR/src/main/resources/application"*.yml` → value matches `http://localhost:8081/realms/listings`
+- [ ] All core TP1 checklists (1·2·3·5·6·8) still pass (`cd "$TP1_DIR" && mvn clean verify`)
+- [ ] You can explain *why* the API fetches its public keys from `/protocol/openid-connect/certs` before validating any JWT
 
-### Behavior
-
-| # | Requirement |
-|---|---|
-| 3a.1 | The API still boots, the core TP1 checklists (1·2·3·5·6·8) still pass (no regression). |
-| 3a.2 | `pom.xml` contains the `spring-boot-starter-oauth2-resource-server` dependency. |
-| 3a.3 | `application.yml` (or `application-dev.yml`) contains `spring.security.oauth2.resourceserver.jwt.issuer-uri: http://localhost:8081/realms/listings`. |
-| 3a.4 | The JWKS endpoint for that issuer is reachable: `GET http://localhost:8081/realms/listings/protocol/openid-connect/certs` → `200` with a `keys` array. |
-| 3a.5 | A TP1 basic-auth write (e.g. `POST /auth/register` followed by `POST /listings` with `Authorization: Basic …`) still returns `201`. |
-
-### Acceptance checklist
-
-- [ ] `docker compose` (base, `../springboot`) — the app still boots on **8080**
-- [ ] `GET http://localhost:8080/actuator/health` → 200
-- [ ] `grep -q "spring-boot-starter-oauth2-resource-server" pom.xml` → yes
-- [ ] `grep -E "issuer-uri" src/main/resources/application*.yml` → value matches `http://localhost:8081/realms/listings`
-- [ ] All core TP1 checklists (1·2·3·5·6·8) still pass (`cd ../springboot && mvn clean verify`)
-- [ ] In your notebook: "I can explain *why* the API fetches its public keys from `/protocol/openid-connect/certs` before validating any JWT."
-
-### Hints
-
-- Spring Security — *OAuth2 Resource Server → JWT*:
-  <https://docs.spring.io/spring-security/reference/servlet/oauth2/web/jwt.html>
-- `issuer-uri` is the single Spring config that lets a `JwtDecoder`
-  auto-discover the **JWKS** endpoint. You do **not** build the decoder by
-  hand.
-- The JWKS URL is derived from `issuer-uri`:
-  `{issuer}/protocol/openid-connect/certs`. Verify it returns a JSON
-  `keys` array **before** you rely on it in Step 3b.
-- If the app does not boot after adding the starter, look at the
-  `NoSuchBeanDefinitionException` (or similar) — usually a conflicting
-  `SecurityFilterChain` from TP1. Read the stack trace before touching code.
+### If you are stuck
+- Spring Security — *OAuth2 Resource Server → JWT*: <https://docs.spring.io/spring-security/reference/servlet/oauth2/web/jwt.html>.
+- `issuer-uri` is the **single** Spring config that lets a `JwtDecoder` auto-discover the **JWKS** endpoint — you do **not** build the decoder by hand.
+- The JWKS URL is derived from `issuer-uri`: `{issuer}/protocol/openid-connect/certs`. Verify it returns a JSON `keys` array **before** you rely on it in Step 3b.
+- If the app does not boot after adding the starter, look at the `NoSuchBeanDefinitionException` (or similar) — usually a conflicting `SecurityFilterChain` from TP1. Read the stack trace **before** touching code.
 
 ---
 
-## Step 3b — Switch to Bearer, drop the Basic path `CORE`
+## Step 3b — Switch to Bearer, drop the Basic path   CORE
 
-> **User story** — *As a **platform developer**, I want the TP1 API to
-> **verify Keycloak JWTs** and stop using HTTP Basic, so that **identity is
-> centralised** and no local password is ever stored.*
+**Outcome** — The TP1 API **verifies Keycloak JWTs** (Bearer) and **stops
+using HTTP Basic**: a write with no / bad / forged token → **401**, a write
+with a valid `listings` JWT → **201**, and `GET /listings*` stays **public**.
+The local `user` table and BCrypt are **no longer on any write path** —
+**identity is centralised** and no local password is ever stored.
 
-### Changes to make in the TP1 (`../springboot`)
+### Build it
+**In the TP1 repo (`../springboot`)** — on top of Step 3a:
+1. **Replace** the `httpBasic(...)` clause in `SecurityConfig` with
+   `.oauth2ResourceServer(jwt -> …)` on the protected **write** paths. (The
+   `seller` role mapping is **Step 4's** job — this step only enforces
+   "some valid bearer".)
+2. **Keep** `pom.xml` (both `spring-boot-starter-security` +
+   `spring-boot-starter-oauth2-resource-server`), `application.yml`
+   (`issuer-uri`), and the `UserServiceImpl` bean **unchanged** — but make
+   sure **no production request path** reads the BCrypt path anymore.
+3. **(Optional)** `@Disabled` the TP1 Basic-auth tests
+   (`// TP1 Basic-auth tests — see TP2 Step 3b`).
+4. **Rebuild + restart** (`cd "$TP1_DIR" && docker compose up -d --build
+   listings-api`), then obtain a fresh token and exercise the matrix below.
 
-On top of Step 3a:
+### Expected behavior
+- A **write** (`POST /listings`, `PUT/DELETE /listings/{id}`) with **no**
+  `Authorization` header → **401**.
+- A write with a token whose **issuer / audience / signature / expiry** is
+  wrong → **401**.
+- A write with a **valid `listings` JWT** is **accepted**; the claims
+  (`sub`, `realm_access.roles`) are available to the security chain.
+- `GET /listings*` **stays public** (no token needed) — **same as TP1**.
+- The local `user` table and **BCrypt** are **no longer part of any write
+  path** (the bean may exist, but **nothing calls it**).
 
-| What | From (3a) | To (3b) |
-|---|---|---|
-| `SecurityConfig` | `.httpBasic(...)` on protected writes | `.oauth2ResourceServer(jwt -> jwt…)` on protected writes |
-| `pom.xml` | both `spring-boot-starter-security` and `spring-boot-starter-oauth2-resource-server` | unchanged |
-| `UserServiceImpl` (TP1) | BCrypt path | keep the bean, make sure **no production request path** reads it |
-| `application.yml` | `issuer-uri` set | unchanged |
-| TP1 tests (only if you wrote them) | `httpBasic(...)` / `@WithMockUser` | `@Disabled` with a comment (`// TP1 Basic-auth tests — see TP2 Step 3b`). **Optional.** |
+### Verify
+- [ ] `POST /listings` **without** Bearer → **401** (not 400, not 500)
+- [ ] `POST /listings` with a **forged** token (e.g. `iss` from a different realm) → **401**
+- [ ] `POST /listings` with the **canonical** token from [`docs/verification.md` §5](docs/verification.md) → **201**
+- [ ] `GET /listings` anonymous → **200** (unchanged)
+- [ ] `grep -rE "httpBasic|@WithMockUser" "$TP1_DIR/src/main/java"` → **no hit** (the production chain no longer uses Basic)
+- [ ] (only if you wrote them) the TP1 Basic-auth tests are `@Disabled` (or deleted) — **not** a required part of this step
 
-### Behavior
-
-| # | Requirement |
-|---|---|
-| 3b.1 | A write (`POST /listings`, `PUT/DELETE /listings/{id}`) with **no** `Authorization` header → `401`. |
-| 3b.2 | A write with a token whose **issuer / audience / signature / expiry** is wrong → `401`. |
-| 3b.3 | A write with a **valid** `listings` JWT is accepted; the claims (`sub`, `realm_access.roles`) are available to the security chain. |
-| 3b.4 | `GET /listings*` stays **public** (no token needed) — same as TP1. |
-| 3b.5 | The local `user` table and BCrypt are **no longer part of any write path** (the bean may exist, but nothing calls it). |
-
-### Acceptance checklist
-
-- [ ] `POST /listings` **without** Bearer → `401` (not 400, not 500)
-- [ ] `POST /listings` with a **forged** token (e.g. `iss` from a different realm) → `401`
-- [ ] `POST /listings` with the **canonical** token from
-  `docs/verification.md` §5 → `201`
-- [ ] `GET /listings` anonymous → `200` (unchanged)
-- [ ] (only if you wrote them) the TP1 Basic-auth tests are `@Disabled`
-      (or deleted) — they are **not** a required part of this step
-- [ ] `grep -rE "httpBasic|@WithMockUser" src/main/java` → no hit
-      (the production chain no longer uses Basic)
-
-### Hints
-
-- Spring Security reference — same page as 3a.
-- In `SecurityConfig`, replace the `httpBasic(...)` clause with:
-  `.oauth2ResourceServer(jwt -> jwt.authenticationConverter(...))`
-  (or the default `JwtAuthenticationConverter` + a custom
-  `authoritiesMapper` for the `seller` role — that is Step 4 territory).
-- The `BCryptPasswordEncoder` bean can stay as a bean (Spring does not use it
-  anymore) or be removed. Either is fine — **but** make sure no
-  production path reads it.
-- A useful test:
-  `POST /auth/register` (still 200 or, if you keep TP1's behavior, 400 with
-  a clear "feature deprecated in TP2 — see Step 5" message). Do **not** let
-  it succeed and hash a password into the `user` table — that would
-  reintroduce a local password.
-- If you see a `401` with no `WWW-Authenticate: Bearer` hint, the
-  `oauth2ResourceServer` config is probably missing on that request matcher.
+### If you are stuck
+- Spring Security reference — same page as Step 3a.
+- In `SecurityConfig`, replace the `httpBasic(...)` clause with `.oauth2ResourceServer(jwt -> jwt.authenticationConverter(…))` — or the default `JwtAuthenticationConverter` + a custom `authoritiesMapper` for the `seller` role (that is **Step 4** territory, not this one).
+- The `BCryptPasswordEncoder` bean can stay as a bean (Spring does not use it anymore) or be removed — **but** make sure no production path reads it.
+- A useful test: `POST /auth/register` may still **200**, or — if you keep TP1's behavior — **400** with a clear *"feature deprecated in TP2 — see Step 5"* message. Do **not** let it hash a password into the `user` table — that would **reintroduce** a local password.
+- If you see a `401` with **no** `WWW-Authenticate: Bearer` hint, the `oauth2ResourceServer` config is probably **missing** on that request matcher.
 
 ---
 
-## Step 4 - Map claims to authorizations `CORE`
+## Step 4 — Map claims to authorizations   CORE
 
-> **User story** — *As a **platform developer**, I want a valid token with the
-> `seller` role to be **allowed to write** and a token without it to be
-> **denied**, so that **authorization follows the identity** without any local
-> account.*
+**Outcome** — **Authorization follows the identity**: a valid token with the
+`seller` role is **allowed to write**, a token without it is **denied**
+(`401` no token / `403` wrong role), `GET /listings*` stays **public**, and a
+new `GET /auth/whoami` returns the **current claims**. The decision is taken
+**from the JWT only** — no local `user` table.
 
-### Behavior
+### Build it
+**In the TP1 repo (`../springboot`)**:
+1. **Keep** `GET /listings**` **`permitAll()`** (public reads unchanged).
+2. **Require** a valid bearer **plus the `seller` role** on
+   `POST/PUT/DELETE /listings`. Map the role from the claim
+   (`realm_access.roles` → `ROLE_seller`), e.g. a custom `authoritiesMapper`
+   on the `.oauth2ResourceServer(jwt -> jwt.authenticationConverter(…))` chain.
+3. **Expose** `GET /auth/whoami`: return the current claims
+   (`sub`, `preferred_username`, `realm_access.roles`); unauthenticated →
+   **401**.
+4. **Rebuild + verify** the full matrix below.
 
-| # | Requirement |
-|---|---|
-| 4.1 | `GET /listings` and `GET /listings/{id}` stay **public** (no token needed) — same as TP1. |
-| 4.2 | `POST /listings` requires a valid token whose `realm_access.roles` contains **`seller`**. Otherwise → `401` (no token) or `403` (wrong role). |
-| 4.3 | `PUT`/`DELETE /listings/{id}` require **the same rules as TP1**: a valid `seller` token AND `sub == listing.owner_sub`. Non-owner (another seller) → `403`. |
-| 4.4 | The API exposes `GET /auth/whoami`: returns the **current claims** (`sub`, `preferred_username`, `realm_access.roles`) for the bearer. Unauthenticated → `401`. |
-| 4.5 | No local `user` table is required: the decision is taken **from the JWT only**. |
+### Expected behavior
 
-### Expected behavior matrix
+**The authorization contract** (the `PUT`/`DELETE` "own vs other" split is
+decided by `sub == listing.owner_sub` — that key is **introduced in Step 5**;
+this step states the **target** contract):
 
 | Client | GET list | POST | PUT own | PUT other | DELETE own |
 |---|---|---|---|---|---|
-| Anonymous | 200 | 401 | 401 | 401 | 401 |
-| Seller (not owner) | 200 | 201 | 403 | 403 | 403 |
-| Seller (owner) | 200 | 201 | 200 | — | 204 |
+| **Anonymous** | 200 | 401 | 401 | 401 | 401 |
+| **Seller (not owner)** | 200 | 201 | 403 | 403 | 403 |
+| **Seller (owner)** | 200 | 201 | 200 | — | 204 |
 
-> The `PUT`/`DELETE` "own vs other" rows (200 vs 403) are decided by
-> `sub == listing.owner_sub`; that key is introduced in **Step 5** (this step
-> states the target authorization contract).
+Plus:
+- `GET /listings` and `GET /listings/{id}` stay **public** (no token needed)
+  — same as TP1.
+- `POST /listings` requires a valid token whose `realm_access.roles` contains
+  **`seller`**; otherwise `401` (no token) or `403` (wrong role).
+- `GET /auth/whoami` returns the **current claims**; unauthenticated → `401`.
+- **No local `user` table** is required — the decision comes **from the JWT
+  only**.
 
-### Acceptance checklist
-
-- [ ] every row of the matrix above behaves exactly as shown
+### Verify
+- [ ] **every row** of the matrix above behaves **exactly** as shown
 - [ ] `GET /listings` and `GET /listings/{id}` stay **public** (no token needed)
 - [ ] `alice` `GET /auth/whoami` → 200, body has `sub` and `realm_access.roles` containing `seller`
-- [ ] unauthenticated `GET /auth/whoami` → `401`
+- [ ] unauthenticated `GET /auth/whoami` → **401**
 
-### Hints
-
-- In `SecurityConfig`: keep `GET /listings**` `permitAll()`; require
-  `authenticated()` + a role matcher on `POST/PUT/DELETE`. The role name maps
-  from the claim (`realm_access.roles` → `ROLE_seller`).
-- The ownership rule (`sub == owner_sub`) stays in the **service layer**
-  (exactly as TP1's "owner only" rule), but the comparison key is now the
-  `sub` claim, not a local `user` id.
+### If you are stuck
+- In `SecurityConfig`: keep `GET /listings**` `permitAll()`; require `authenticated()` + a role matcher on `POST/PUT/DELETE`. The role name maps **from the claim** (`realm_access.roles` → `ROLE_seller`).
+- The **ownership** rule (`sub == owner_sub`) stays in the **service layer** (exactly as TP1's "owner only" rule), but the comparison key is now the **`sub` claim**, not a local `user` id.
 
 ---
 
-## Step 5 - Refactor the data model (drop the local user) `CORE`
+## Step 5 — Refactor the data model (drop the local user)   CORE
 
-> **User story** — *As a **platform developer**, I want the listing to store
-> the Keycloak `sub` (`owner_sub`) instead of a local `user_id`, so that the
-> **identity source is single** and the `user` table can disappear.*
+**Outcome** — The **single source of identity** is Keycloak: `listing` stores
+the creator's `sub` as **`owner_sub`** (instead of a local `user_id`), the
+whole local identity (`user` table, `User` entity, `UserRepository`,
+`UserService`, `/auth/register`) is **deleted**, ownership is
+`bearer.sub == listing.owner_sub`, and **all TP1 business rules still hold**
+(verified by `curl`).
 
-### Behavior
+### Build it
+**In the TP1 repo (`../springboot`)**:
+1. **Add** a Liquibase changeSet (e.g. `v1.3-owner-sub.yaml`) that does
+   `addColumn` on `listing`: `owner_sub` (string, **nullable**) —
+   **additive only**. Do **not** destructively drop `user_id` (the core TP1
+   tests must stay green; a cleanup changeSet is optional / bonus). Include it
+   in `db.changelog-master.yaml`.
+2. **Change** the ownership key: on **create**, set `owner_sub` from the
+   bearer's **`sub`** claim; on **PUT/DELETE**, ownership means
+   `bearer.sub == listing.owner_sub` (the service-layer "owner only" rule now
+   compares `sub`, not a local user id).
+3. **Delete** the local identity from the TP1: the `user` table, `User`
+   entity, `UserRepository`, `UserService`, and `/auth/register`
+   (**deleted, not just un-referenced**).
+4. **Rebuild + verify** the whole TP1 rule-set by `curl`
+   (the TP1 Java tests used Basic auth and **do not apply** after Step 3b).
 
-| # | Requirement |
-|---|---|
-| 5.1 | The local `user` table, `User` entity, `UserRepository`, `UserService` and `/auth/register` are **deleted** from the TP1 (the identity is now Keycloak's; the `sub` claim replaces the user id). |
-| 5.2 | `listing` stores `owner_sub` (string) = the `sub` claim of the creator. |
-| 5.3 | The Liquibase schema is **additive**: add `owner_sub` (nullable), do **not** drop `user_id` in a destructive way (the core TP1 tests must stay green). A cleanup changeSet is optional/bonus. |
-| 5.4 | On create, `owner_sub` is set from the bearer's `sub`. On PUT/DELETE, ownership means `bearer.sub == listing.owner_sub`. |
-| 5.5 | The business rules of TP1 (CRUD, V1/V2, versioning, metrics, ownership) still behave as before — verify them **by `curl`** (the TP1 Java tests used Basic auth and do not apply after Step 3b). |
+### Expected behavior
+- `listing` stores **`owner_sub`** = the `sub` claim of the creator.
+- The local `user` table / `User` entity / `UserRepository` / `UserService` /
+  `/auth/register` are **gone**.
+- On **create**, `owner_sub` = bearer's `sub`; on **PUT/DELETE**, ownership =
+  `bearer.sub == listing.owner_sub`.
+- The **TP1 business rules** — CRUD, V1/V2, versioning, metrics, ownership —
+  **still behave as before** (verify by `curl`).
 
-### Acceptance checklist
-
+### Verify
 - [ ] `user` table / `User` entity / `UserRepository` / `UserService` / `/auth/register` are **gone** (deleted, not just un-referenced)
 - [ ] `POST /auth/register` → **405** or **410** (the endpoint is gone)
 - [ ] a created listing has `owner_sub` set to the creator's `sub`
-- [ ] `PUT/DELETE` by the creator → 200/204; by another seller (different `sub`) → 403
-- [ ] the **business rules of TP1** still hold (verify with `curl`): CRUD happy paths, V2 non-seller field hiding (Step 6 of TP1), `?version=` V1/V2 fallback (Step 6 of TP1), `listings.created` counter
-- [ ] `cd ../springboot && mvn clean verify` → green (the TP1 starter smoke test does not need the Keycloak stack)
+- [ ] `PUT/DELETE` by the creator → 200/204; by another seller (different `sub`) → **403**
+- [ ] the **TP1 business rules** still hold (via `curl`): CRUD happy paths, V2 non-seller field hiding, `?version=` V1/V2 fallback, the `listings.created` counter
+- [ ] `cd "$TP1_DIR" && mvn clean verify` → **green** (the TP1 starter smoke test does not need the Keycloak stack)
 
-### Hints
-
-- Add a Liquibase changeSet `v1.3-owner-sub.yaml` (or `ownerSub`) with
-  `addColumn` on `listing` — additive only.
-- Change the ownership check key from the local user id to the `sub` string.
-- `mvn clean verify` is your final net (the TP1 starter smoke test does not need the Keycloak stack; any optional tests you wrote that hit Keycloak are **not required** for the core checklist).
+### If you are stuck
+- The Liquibase changeSet is **additive**: one `addColumn listing owner_sub VARCHAR(255) NULL`. Do **not** run a `dropColumn` on `user_id` unless you also have a cleanup changeSet (and you have verified the DB migration).
+- `mvn clean verify` is your **final net** — the TP1 starter smoke test does **not** need Keycloak; any optional tests that hit Keycloak are **not** part of the core checklist.
 
 ---
 
-## Step 6 - 401 / 403 contracts `BONUS`
+## Step 6 — 401 / 403 contracts   BONUS
 
-> **User story** — *As an **API client**, I want a clear `401` (no/bad token)
-> and a clear `403` (right user, wrong role) with a consistent `WWW-Authenticate`
-> hint, so that **my client can react** (re-login, or tell me I cannot).*
+**Outcome** — As an **API client**, you get a **clear `401`** (no/bad token)
+*and* a **clear `403`** (right user, wrong role), both with a consistent
+**`WWW-Authenticate: Bearer realm="listings"`** hint on 401 — so your client
+can **react** (re-login, or "you cannot").
 
-> **Not to be confused with Step 4.** Step 4 decides **who can do what**
-> (the authorization decision) — the same decision stays valid here. Step 6
-> is about **how a refusal is *phrased* as an HTTP response**: the status
-> code, the body shape, and the `WWW-Authenticate` header on 401. Everything
-> in Step 6 is "response surface" — no new business rule, no new role logic,
-> no new endpoint.
->
-> Step 6 only *adds* **one** concrete requirement on top of Step 4: protected
-> write endpoints that return **401** (missing/invalid/expired token) must
-> also carry the standard header `WWW-Authenticate: Bearer realm="listings"`
-> so that a well-behaved client knows *where* to log in. This single
-> requirement is the step's whole contract.
+> **Not to be confused with Step 4.** Step 4 decides **who can do what** —
+> that decision is unchanged here. Step 6 is only about **how a refusal is
+> phrased** as an HTTP response: the status code, the body shape, and the
+> `WWW-Authenticate` header on 401. It **adds exactly one** requirement on top
+> of Step 4: a protected write that returns **401** (missing/invalid/expired
+> token) must **also** carry
+> `WWW-Authenticate: Bearer realm="listings"` so a well-behaved client knows
+> *where* to log in.
 
-### Behavior
+### Build it
+**In the TP1 repo (`../springboot`)**:
+1. **Set the `WWW-Authenticate` response header** in `SecurityConfig` via
+   `.exceptionHandling(e -> e.authenticationEntryPoint(…))` on 401.
+2. **Confirm** the **403** (no `seller` role / not owner) still uses TP1's
+   exact JSON body shape (`status`/`timestamp`/`error`/`message`).
+3. **Rebuild + verify** that 401, 403, and the public-read path all behave
+   (and that public reads are **not** broken).
 
-| # | Requirement |
-|---|---|
-| 6.1 | A `401` on a protected write carries **both** the JSON error body **and** the header `WWW-Authenticate: Bearer realm="listings"` (so a client knows where to log in). |
-| 6.2 | A `403` (valid bearer, but no `seller` role / not the owner) uses the **same JSON error body shape** as TP1 (status/timestamp/error/message). |
-| 6.3 | A public read (`GET /listings`) **without a token** still returns `200` — Step 6 must not accidentally break public reads. |
-| 6.4 | `404`/`409`/`422` keep **exactly** the TP1 JSON body shape (unknown listing, duplicate, validation `fields` map). |
+### Expected behavior
+- A **401** on a protected write carries **both** the JSON error body **and**
+  the header `WWW-Authenticate: Bearer realm="listings"`.
+- A **403** (valid bearer, but no `seller` role / not the owner) uses the
+  **same JSON body shape** as TP1.
+- A **public read** (`GET /listings`) without a token still returns **200** —
+  Step 6 must not break public reads.
+- **404 / 409 / 422** keep **exactly** the TP1 JSON body shape.
+- The full status-code matrix is the **Step 4** matrix — Step 6 only changes
+  *how* the 401 is phrased (the `WWW-Authenticate` header).
 
-> Full status-code matrix (who gets which code on which endpoint) — see the
-> **Step 4** matrix; Step 6 does not change any of those decisions, only
-> *how* the `401` is phrased (the `WWW-Authenticate` header).
+### Verify
+- [ ] a `401` on a protected write carries `WWW-Authenticate: Bearer realm="listings" ...`
+- [ ] a `403` for a valid-but-unauthorised seller (wrong role / not owner) → TP1 JSON shape
+- [ ] anonymous reads remain **200**
 
-### Acceptance checklist
-
-- [ ] `401` on a protected write carries `WWW-Authenticate: Bearer realm="listings" ...`
-- [ ] `403` for a valid-but-unauthorised seller (wrong role / not owner)
-- [ ] anonymous reads remain `200`
-
-### Hints
-
-- Set the `WWW-Authenticate` response header in the `SecurityConfig`
-  (`.exceptionHandling(e -> e.authenticationEntryPoint(...))`).
-- `403` "not owner" comes from the **service layer**; `403` "no seller role"
-  from `SecurityConfig`.
+### If you are stuck
+- The `WWW-Authenticate` header is set via `.exceptionHandling(e -> e.authenticationEntryPoint(…))` in `SecurityConfig`.
+- `403` "not owner" comes from the **service layer**; `403` "no `seller` role" comes from `SecurityConfig`.
 
 ---
 
-## Step 7 - SPA wired to Keycloak `BONUS`
+## Step 7 — SPA wired to Keycloak   BONUS
 
-> **User story** — *As an **end user**, I want to **log in through Keycloak**
-> in a small web app and **list / create listings** without typing JWTs by
-> hand, so the flow is **what a real user experiences**.*
+**Outcome** — As an **end user**, you can **log in through Keycloak** in a
+small web app and **list / create listings** **without typing JWTs by hand** —
+the real-user flow, end to end.
 
-A starter is provided in `spa/` (keycloak-js + `fetch`). See
-`spa/README-spa.md`. Acceptance:
+### Build it
+> A **starter** is provided in `spa/` (keycloak-js + `fetch`) — see
+> `spa/README-spa.md`. This step re-uses the public client **`listings-spa`**
+> and the **code flow + PKCE** (different from the confidential `listings-api`
+> used by scripts in Step 2).
 
-- [ ] from the SPA, login as `alice/secret` (redirect flow)
+1. **Complete** the SPA starter so it loads `keycloak-js` from Keycloak
+   (`http://localhost:8081/js/keycloak.js`) and calls the API at
+   `http://localhost:8080` (see `spa/js/config.js`).
+2. **Serve + open** the SPA, **log in** as `alice` / `secret` (redirect flow).
+3. **List** the listings with the `seller` token and **create** one; then
+   **log out** and confirm the session is cleared.
+
+### Expected behavior
+- **Login** as `alice` / `secret` works (redirect flow, code + PKCE).
+- The **listing list loads** with the `seller` token (the API returns 200/201).
+- **Logout clears the session**.
+
+### Verify
+- [ ] from the SPA, login as `alice` / `secret` (redirect flow)
 - [ ] the listing list loads with the `seller` token (the API returns 200/201)
 - [ ] logout clears the session
 
-> This step re-uses the client **`listings-spa`** (public) and the **code
-> flow + PKCE** — different from the confidential `listings-api` used by
-> scripts (Step 2).
+### If you are stuck
+- The starter in `spa/` is **not empty but not finished** — `spa/README-spa.md` tells you the 3-4 pieces to wire.
+- If the SPA shows "401" on the first load, the `keycloak.init` promise has not resolved before the `fetch` — **await** it.
 
 ---
 
-## Step 8 - Beyond the token: an authenticator and a custom authentication flow `BONUS`
+## Step 8 — Beyond the token: an authenticator and a custom authentication flow   BONUS
 
-> **User story** — *As a **platform developer**, I want to **add a second
-> factor (FIDO2/WebAuthn)** and to **rework the login flow itself** (a
-> password step then a conditional WebAuthn step) purely in Keycloak, so that
-> I experience identity as a **configurable platform** — not as a fixed
-> username/password check — and to see it change the JWT.*
+**Outcome** — You **add a second factor (FIDO2/WebAuthn)** and **rework the
+login flow itself** (a `Password` step then a **conditional** WebAuthn step)
+**purely in Keycloak** — so identity is a **configurable platform**, not a
+fixed username/password check, and you can **see it change the JWT**. This is
+the other face of Keycloak: so far you have *consumed* tokens; here you
+**produce the authentication policy**, entirely via the **admin console**
+and/or **`realm.json`** (no Java).
 
-This is the step that reveals the other face of Keycloak. So far you have
-*consumed* tokens; here you **produce the authentication policy**. It is done
-entirely through the **admin console** and/or **`realm.json`** (no Java), which
-keeps it achievable inside the session.
+### Build it
+In **this repo** (`realm/realm.json`) **or** the admin console (no Java):
+1. **Enable FIDO2 / WebAuthn** on the realm `listings` (a user can register a
+   platform authenticator).
+2. **Customize the login flow**: a `Password` step followed by a
+   **conditional WebAuthn** (or OTP) step — a multi-factor flow, visible to
+   `alice`.
+3. **State** exactly which claim you rely on to read the assurance —
+   `acr` (e.g. `password` vs `webauthn`/`otp`) or `auth_time`/`sso`.
+4. **Prove reproducibility**: export the realm (**Export → full**) and re-import
+   it back — that is your "no-code, reproducible" proof.
 
-### Behavior
+### Expected behavior
+- The realm `listings` **enables FIDO2 / WebAuthn** (a user can register a
+  platform authenticator).
+- The login flow is **customized**: a `Password` step then a **conditional
+  WebAuthn** (or OTP) step — a multi-factor flow, visible to `alice`.
+- Completing the flow **changes the token** — `acr` (or `auth_time`/`sso`)
+  reflects the method used.
+- A user **without** a registered authenticator still logs in (the WebAuthn
+  step is **conditional**), so the core stays usable.
+- Everything works from the browser console **and/or** `realm.json`; **no**
+  hard-coded anything in the Java code.
 
-| # | Requirement |
-|---|---|
-| 8.1 | The realm `listings` **enables FIDO2 / WebAuthn** (a user can register a platform authenticator). |
-| 8.2 | The login flow is **customized**: a `Password` step followed by a **conditional WebAuthn** (or OTP) step — i.e. a multi-factor flow — visible to `alice`. |
-| 8.3 | Completing the flow changes the **token**: either the `acr` claim reflects the method used (e.g. `password` vs `webauthn`/`otp`), or `auth_time`/`sso` reflects the new session. State exactly which claim you rely on and why. |
-| 8.4 | A user without a registered authenticator still logs in (the WebAuthn step is **conditional**), so the core stays usable. |
-| 8.5 | Everything works from the browser (console) **and/or** `realm.json`; do not hard-code anything in the Java code. |
-
-### Acceptance checklist
-
-- [ ] FIDO2/WebAuthn is enabled for the realm (visible in the admin console → Authentication → flows)
+### Verify
+- [ ] FIDO2/WebAuthn is enabled for the realm (admin console → Authentication → flows)
 - [ ] `alice` can register an authenticator and the login flow now includes a second step
-- [ ] After the full flow, the JWT shows the higher assurance (`acr`/method) or a fresh `auth_time`
-- [ ] A new user (no authenticator) still completes login (conditional step skipped)
-- [ ] The change is reproducible via `realm.json` (or documented admin-console steps) — no code change
+- [ ] after the full flow, the JWT shows the higher assurance (`acr`/method) or a fresh `auth_time`
+- [ ] a new user (no authenticator) still completes login (conditional step skipped)
+- [ ] the change is reproducible via `realm.json` (or documented admin-console steps) — **no code change**
 
-### Hints
-
-- Admin console → **Realms → `listings` → Authentication → Flows**: duplicate
-  the `browser` flow, add a `WebAuthn` step (or a `Conditional OTP`) after
-  `Password`, and make it **conditional** (e.g. "webauthn conditional").
-- Enable FIDO2 under **Authentication → Flows → configure the WebAuthn
-  authenticator** (Relying Party Id, etc.).
-- `acr` (Authentication Context Class Reference) is the OIDC claim describing
-  *how* the subject was authenticated — the natural thing to assert on.
-- Re-export the realm (**Export → full**) to see the flow serialized in the
-  JSON, then import it back — that is your "no-code, reproducible" proof.
-- Keep password-only as the **fallback** flow for scripts (`listings-api`) so
-  core tests are unaffected; bind the WebAuthn flow to the browser client.
-- (Out of scope, "to go further") a **custom authenticator Provider** written
-  in Java and imported into Keycloak — mention it, do not build it in this TP.
+### If you are stuck
+- Admin console → **Realms → `listings` → Authentication → Flows**: duplicate the `browser` flow, add a `WebAuthn` step (or a `Conditional OTP`) after `Password`, and make it **conditional** (e.g. "webauthn conditional").
+- Enable FIDO2 under **Authentication → Flows → configure the WebAuthn authenticator** (Relying Party Id, etc.).
+- `acr` (Authentication Context Class Reference) is the OIDC claim describing *how* the subject was authenticated — the natural thing to assert on.
+- Keep password-only as the **fallback** flow for scripts (`listings-api`) so core tests are unaffected; bind the WebAuthn flow to the browser client.
+- (Out of scope, "to go further"): a **custom authenticator Provider** in Java imported into Keycloak — mention it, do **not** build it in this TP.
 
 ---
 
-## Bonus (start only when the core checklist is green)
+## Bonus (start only when the core `Verify` sections are green)
 
 - **Refresh**: the SPA / client renews the access token with the
   `refresh_token` before it expires.
@@ -598,16 +639,25 @@ keeps it achievable inside the session.
 
 ---
 
-## Step 9 - Final Integration
+## Step 9 — Final Integration   DELIVERY
 
-| # | Requirement |
-|---|---|
-| 9.1 | `docker compose up -d` (Keycloak + Postgres) is **healthy**; the realm `listings` is present. |
-| 9.2 | `mvn clean verify` (TP1) is **green** — the starter smoke test passes (any optional tests you wrote that require Keycloak are not part of the core delivery). |
-| 9.3 | The README documents: how to start the stack, how to get a token, the 401/403 contracts, claims used, and your technical choices. (Add the bonus authentication flow only if you built it.) |
-| 9.4 | The local `user` table / BCrypt / `/auth/register` are no longer used for authentication. |
-| 9.5 | No `TODO` / stubs remain in production code. (If you wrote tests, they pass — optional.) |
-| 9.6 | Oral: 10 min (OAuth2/OIDC flow, JWT verification, ownership via `sub`) + 5 min Q&A. (If you built the bonus authentication flow, demo it.) |
+**Outcome** — The whole stack boots clean from **your own configs**; the
+realm `listings` is present, the **TP1 Java is green**, the **local `user`
+table / BCrypt / `/auth/register` are no longer used**, no `TODO` or stubs
+remain in production code, the team README documents the choices, and you can
+**walk one token → JWT → authorization decision** in the oral.
+
+### Final checks
+- [ ] `cd "$KC_DIR" && docker compose up -d` → Keycloak + Postgres **healthy**; the realm `listings` is present
+- [ ] `cd "$TP1_DIR" && mvn clean verify` → **green** (the starter smoke test passes; any optional tests that require Keycloak are **not** part of the core delivery)
+- [ ] The team **README** documents: how to start the stack, how to get a token, the 401/403 contracts, the claims used, and your technical choices (add the bonus authentication flow **only if you built it**)
+- [ ] The local `user` table / BCrypt / `/auth/register` are **no longer used for authentication**
+- [ ] No `TODO` / stubs remain in production code (if you wrote tests, they pass — optional)
+- [ ] **Oral** (10 min + 5 Q&A): walk one OAuth2/OIDC flow, JWT verification, ownership via `sub` (demo the bonus authentication flow if you built it)
+
+### If you are stuck
+- The **team README** is where you write *what* you decided and *why* — it is **not** a copy of this exercise statement. It is what the evaluator reuses to **run the stack in your place** and **trust the output**.
+- The **smoke bar** is `mvn clean verify` green — the TP1 starter smoke test does **not** require the Keycloak stack, and none of the optional tests you may have written that do is part of the core checklist.
 
 ---
 

@@ -3,6 +3,14 @@
 Goal: verify that the stack (Keycloak + Postgres) is up, that the `listings`
 realm is imported, and that we can obtain a valid JWT for `alice`.
 
+> **Paths:** the commands below use two variables, set once per terminal
+> (from the "Run" box of [`README.md`](../README.md)):
+>
+> ```bash
+> export TP1_DIR="/path/to/your/tps-1-repo"     # the Spring Boot app repo
+> export KC_DIR="/path/to/keycloak-repo"        # this Keycloak repo
+> ```
+
 ## 1) Prerequisites
 
 - `docker compose` available (`docker compose version`).
@@ -13,8 +21,8 @@ realm is imported, and that we can obtain a valid JWT for `alice`.
 ## 2) Start
 
 ```bash
-cd ../springboot && docker compose up -d   # base: API (8080) + its Postgres (5435)
-cd ../keycloak  && docker compose up -d    # this: Keycloak (8081) + its Postgres (5436)
+cd "$TP1_DIR" && docker compose up -d   # base: API (8080) + its Postgres (5435)
+cd "$KC_DIR"  && docker compose up -d   # this: Keycloak (8081) + its Postgres (5436)
 ```
 
 `depends_on` waits for `keycloak-postgres` to become `healthy` before starting
