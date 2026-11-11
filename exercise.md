@@ -710,7 +710,7 @@ User, UserRepository, UserService, /auth/register, /auth/me ──> deleted   (g
 - [ ] `POST /auth/register` → **404** with a JSON body (the endpoint is gone)
 - [ ] a created listing has `owner_sub` set to the creator's `sub` and `user_id` `NULL` (`psql`)
 - [ ] `PUT/DELETE` by the creator → 200/204; by another seller (different `sub`) → **403**
-- [ ] the **TP1 business rules** still hold (via `curl`): CRUD happy paths, V2 non-seller field hiding, `?version=` V1/V2 fallback, the `listings.created` counter
+- [ ] the **TP1 business rules** still hold (via `curl`): CRUD happy paths, V2 non-seller field hiding, `?version=` V1/V2 fallback, the `listings.creations` counter
 - [ ] `cd "$TP1_DIR" && mvn clean verify` → **green** (the TP1 starter smoke test does not need the Keycloak stack)
 
 ### If you are stuck

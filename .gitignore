@@ -1,36 +1,45 @@
-# --- Keycloak ---
+# ------------------------------------------------------------------
+#  TP Keycloak — .gitignore
+# ------------------------------------------------------------------
+
+# The realm export of Appendix C (`realm-export/`) IS committed: it is the
+# deliverable that makes the Step 8 flow reproducible.
+
+# --- Keycloak local data (dev-file mode, if used) ---
 .keycloak-data/
 kc-data/
 
-# --- Java / build ---
+# --- SPA (bonus) ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# --- Java / build (none expected here; guards a stray IDE build) ---
 target/
-*.log
+bin/
+
+# --- Secrets and local env (the Gemini key lives in the shell only) ---
+.env
+.env.*
+*.env
+*.local
 
 # --- IDE ---
 .idea/
 *.iml
+*.ipr
+*.iws
 .vscode/
 .classpath
 .project
 .settings/
 .factorypath
-bin/
 
-# --- Node / SPA (bonus) ---
-node_modules/
-npm-debug.log*
-yarn-error.log*
-
-# --- Ad-hoc scratch / shell-redirect output (e.g. `docker compose ... 2> err.txt`) ---
+# --- Logs and ad-hoc shell-redirect output (e.g. `... 2> err.txt`) ---
+*.log
 /err*.txt
 /out*.txt
 
 # --- OS ---
 .DS_Store
 Thumbs.db
-
-# --- Misc ---
-.env
-*.local
-*.sqlite
-*.sqlite3
