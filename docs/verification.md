@@ -115,7 +115,7 @@ Claims that matter for the Spring Boot application (see `exercise.md`):
 | `email` | `alice@listings.local` |
 | `realm_access.roles` | `["seller"]` |
 | `scope` | `profile email` |
-| `acr` | `1` (level of authentication; Step 8) |
+| `acr` | `1` (level of authentication; Step 8a) |
 
 > `sub` is the stable key that replaces the TP1 `app_user` table — it is the
 > value expected in `listing.owner_sub`.

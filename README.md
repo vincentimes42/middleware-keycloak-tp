@@ -16,6 +16,7 @@ Postgres) plus this folder provides the identity stack:
 
 ## Prerequisites
 
+- Linux or WSL2, Bash terminal ([details](../springboot/README.md#operating-system-and-shell)).
 - Docker + Docker Compose (see `docker compose version`)
 - JDK 27 + Maven 3.9+ (already installed for TP1)
 - Ports free on the host: `8081` (Keycloak), `9001` (Keycloak health / management),
@@ -156,8 +157,9 @@ keycloak/
 ├── realm/
 │   └── realm.json            # realm "listings" — clients, users, roles, audience mapper
 ├── docs/
+│   ├── primer.md             # Keycloak, OAuth2, OIDC, JWT, test strategy
 │   └── verification.md       # admin UI check + token curl + claims
-├── realm-export/             # BONUS (Step 8) — created by you: full realm export
+├── realm-export/             # BONUS (Step 8b) — created by you: full realm export
 │                             #   (kc.sh export, see exercise Appendix C); NOT under realm/
 ├── spa/                      # BONUS (Step 7) — keycloak-js + fetch
 │   ├── index.html
