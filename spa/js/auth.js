@@ -1,17 +1,14 @@
 // =====================================================
 //  auth.js — init Keycloak (code flow + PKCE, via keycloak-js)
+//  ES module: keycloak-js 26 ships as ESM only, pinned version below.
 // =====================================================
-(function () {
-  const { KEYCLOAK_URL, REALM, CLIENT } = window.CONFIG;
+import Keycloak from "https://cdn.jsdelivr.net/npm/keycloak-js@26.2.4/lib/keycloak.js";
 
-  // keycloak-js is loaded by index.html <script src="http://localhost:8081/js/keycloak.js">
-  window.kc = Keycloak({
-    url: KEYCLOAK_URL,
-    realm: REALM,
-    clientId: CLIENT,
-    // let keycloak-js handle PKCE + token refresh
-  });
+const { KEYCLOAK_URL, REALM, CLIENT } = window.CONFIG;
 
-  // if we are already authenticated, load the token without UI
-  kc.init({ onLoad: "login-required", pkceMethod: "S256" });
-})();
+window.kc = new Keycloak({ url: KEYCLOAK_URL, realm: REALM, clientId: CLIENT });
+
+// login-required: redirect to the Keycloak login page if there is no session.
+// The redirect URI is the current page; realm.json allows http://localhost:3000/*.
+// ui.js waits for this promise before calling the API.
+window.kcReady = window.kc.init({ onLoad: "login-required", pkceMethod: "S256" });

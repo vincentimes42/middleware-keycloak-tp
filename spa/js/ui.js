@@ -43,15 +43,16 @@
     }
   }
 
-  function init() {
+  async function init() {
+    // auth.js is a module: wait for keycloak-js to finish the login redirect
+    await window.kcReady;
     if (window.kc.authenticated) $("#login").style.display = "none";
-    const btnLogin = $("#login");
-    btnLogin.onclick = () => (window.location =
-      window.kc.createLoginUrl({ redirectUri: location.href }));
+    $("#login").onclick = () => window.kc.login();
 
     $("#logout").onclick = () => window.kc.logout();
     if (window.kc.authenticated) {
       $("#logout").style.display = "";
+      $("#whoami").style.display = "";
     }
     $("#whoami").onclick = async () => {
       const { status: code, body } = await window.api.whoami();

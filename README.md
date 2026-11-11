@@ -11,15 +11,16 @@ Postgres) plus this folder provides the identity stack:
   `middleware` network (defined in `../springboot/docker-compose.yml`)
 - `realm/realm.json` — the realm, the clients, the accounts, the roles
 - `spa/` (bonus) — a small SPA that consumes the TP1 API with a JWT
-- [`exercise.md`](exercise.md) — the full statement (8h, core 1·2·3a·3b·4·5 + bonus 6·7·8)
+- [`exercise.md`](exercise.md) — the full statement (core 1·2·3a·3b·4·5 + bonus 6·7·8)
 ---
 
 ## Prerequisites
 
 - Docker + Docker Compose (see `docker compose version`)
 - JDK 27 + Maven 3.9+ (already installed for TP1)
-- Ports free on the host: `8081` (Keycloak), `8080` (the API, base — no change for this TP),
-  `5435` (the API's Postgres, base), `5436` (Keycloak's Postgres, this file)
+- Ports free on the host: `8081` (Keycloak), `9001` (Keycloak health / management),
+  `8080` (the API, base — no change for this TP), `5435` (the API's Postgres,
+  base), `5436` (Keycloak's Postgres, this file)
 
 > **Tip:** use `http://localhost:8081` (not `http://127.0.0.1:8081`) for
 > **Keycloak** URLs in every doc. Keycloak copies the request `Host` header
@@ -34,7 +35,7 @@ created by the base project in `../springboot/docker-compose.yml`):
 | Project | Folder | Services | Host ports |
 |---|---|---|---|
 | base | `../springboot` | `listings-api`, `listings-postgres` | API `8080`, pg `5435` |
-| this | `keycloak` | `keycloak`, `keycloak-postgres` | Keycloak `8081`, pg `5436` |
+| this | `keycloak` | `keycloak`, `keycloak-postgres` | Keycloak `8081` (+ `9001` health), pg `5436` |
 
 Services find each other by **container name** over the shared network, never
 by `localhost`. So the API reaches Keycloak as `keycloak:8080` (Keycloak's
@@ -98,11 +99,24 @@ curl -s http://localhost:8081/realms/listings/.well-known/openid-configuration
 docker compose ps        # keycloak + keycloak-postgres healthy
 ```
 
+`healthy` for `keycloak` means *ready* (realm imported): the healthcheck calls
+`/health/ready` on Keycloak's **management port** (container 9000, published on
+host **9001**). From the host:
+
+```bash
+curl -fsS http://localhost:9001/health/ready      # {"status": "UP", ...}
+```
+
+The health endpoints are **not** on the main port: `http://localhost:8081/health/ready`
+answers 404.
+
 Endpoints on the host:
 
 - Admin console: <http://localhost:8081/admin> (`admin` / `admin`)
+- Health (management port): <http://localhost:9001/health/ready>
 - `alice` user console: <http://localhost:8081/realms/listings/account/>
   (`alice` / `secret`)
+- accounts (password `secret`): `alice`, `bob` (role `seller`), `carol` (no role)
 - issuer of the `listings` realm: `http://localhost:8081/realms/listings`
   (this is the value of `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI`)
 - JWKS (public keys):
@@ -119,8 +133,11 @@ python3 -m http.server 3000        # or any static file server
 # open http://localhost:3000
 ```
 
-The SPA loads `keycloak-js` from Keycloak (`http://localhost:8081/js/keycloak.js`)
-and calls the API at `http://localhost:8080` (see `spa/js/config.js`).
+The SPA imports `keycloak-js` 26.2.4 from a CDN (Keycloak 26 no longer serves
+`/js/keycloak.js`) and calls the API at `http://localhost:8080` (see
+`spa/js/config.js`). Serve it from `http://localhost:3000` or `:5500`: those
+are the origins allowed by `realm.json`. The API needs CORS for that origin
+(exercise Step 7).
 
 ## Stop
 
@@ -135,25 +152,29 @@ cd "$TP1_DIR" && docker compose down -v       # wipe the API + its Postgres (opt
 keycloak/
 ├── .gitignore
 ├── docker-compose.yml        # keycloak(26.8) + keycloak-postgres(16) on the
-│                             #   shared `middleware` network (host 8081 / 5436)
+│                             #   shared `middleware` network (host 8081 / 9001 / 5436)
 ├── realm/
-│   └── realm.json            # realm "listings" — clients, users, roles, CORS
+│   └── realm.json            # realm "listings" — clients, users, roles, audience mapper
 ├── docs/
 │   └── verification.md       # admin UI check + token curl + claims
+├── realm-export/             # BONUS (Step 8) — created by you: full realm export
+│                             #   (kc.sh export, see exercise Appendix C); NOT under realm/
 ├── spa/                      # BONUS (Step 7) — keycloak-js + fetch
 │   ├── index.html
 │   ├── js/{config,auth,api,ui}.js
 │   └── README-spa.md
 ├── README.md                 # this file
-└── exercise.md               # the statement (8h, core 1·2·3a·3b·4·5 + bonus 6·7·8)
+└── exercise.md               # the statement (core 1·2·3a·3b·4·5 + bonus 6·7·8)
 ```
 
 ## Useful links (project version)
 
-- Keycloak 26.x — Getting started: <https://www.keycloak.org/documentation>
+- Keycloak 26.x — documentation: <https://www.keycloak.org/documentation>
+- Keycloak — health checks (management port): <https://www.keycloak.org/server/health>
 - Keycloak — Import & Export: <https://www.keycloak.org/misc/import-export>
-- Spring Security — OAuth2 Resource Server / JWT:
-  <https://docs.spring.io/spring-security/reference/servlet/oauth2/web/jwt.html>
+- Spring Security 7.1 — OAuth2 Resource Server / JWT:
+  <https://docs.spring.io/spring-security/reference/7.1/servlet/oauth2/resource-server/jwt.html>
+- keycloak-js (JavaScript adapter): <https://www.keycloak.org/securing-apps/javascript-adapter>
 - OIDC — Core: <https://openid.net/specs/openid-connect-core-1_0.html>
 
 > TP rule: no `TODO`, no stub, no secret in production code.

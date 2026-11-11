@@ -2,13 +2,14 @@
 #  TP Keycloak — attaches to the SHARED `middleware` network (base:
 #  ../springboot/docker-compose.yml, which runs listings-api +
 #  listings-postgres). This project adds:
-#       - keycloak          -> host 8081 (OIDC / admin / health)
+#       - keycloak          -> host 8081 (OIDC / admin), host 9001 (health)
 #       - keycloak-postgres -> host 5436 (Keycloak's store)
 #
 #  Port map (host):
 #       listings-api         8080   (base — no change for this TP; Keycloak moves)
 #       listings-postgres    5435   (base — no change)
 #       keycloak             8081   (this file — moved to keep 8080 for the API)
+#       keycloak (management) 9001  (this file — health endpoints, container 9000)
 #       keycloak-postgres    5436   (this file)
 #
 #  Network + resource sharing:
@@ -28,7 +29,8 @@
 #      $ cd ../springboot && docker compose up -d   # base: API on 8080 + pg on 5435
 #      $ cd ..../keycloak && docker compose up -d   # this: Keycloak on 8081 + pg on 5436
 #  Health (API) : curl -fsS http://localhost:8080/actuator/health
-#  Health (KC)  : curl -fsS http://localhost:8081/health/ready
+#  Health (KC)  : curl -fsS http://localhost:9001/health/ready
+#                 (management port; /health/ready on 8081 is a 404)
 # =====================================================================
 
 name: keycloak-tp
@@ -72,7 +74,8 @@ services:
       KC_DB_PASSWORD: keycloak
       KC_HEALTH_ENABLED: "true"
     ports:
-      - "8081:8080"   # host 8081 -> container 8080 (OIDC, admin console, health)
+      - "8081:8080"   # host 8081 -> container 8080 (OIDC, admin console, account console)
+      - "9001:9000"   # host 9001 -> container 9000 (management: /health, /health/ready)
     volumes:
       # Bind our ./realm dir (realm.json) read-only into the import folder.
       - ./realm:/opt/keycloak/data/import:ro
@@ -82,7 +85,9 @@ services:
         condition: service_healthy
     networks: [middleware]
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8080 && exit 0' || exit 1"]
+      # /health/ready is served on the MANAGEMENT port 9000 (Keycloak 25+), not on 8080.
+      # "healthy" therefore means: realm imported and server ready, not just "port open".
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/9000 && printf \"GET /health/ready HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && grep -q UP <&3' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

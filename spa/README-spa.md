@@ -10,9 +10,11 @@ No framework. No dependency to install (everything runs with vanilla JS +
 `fetch`).
 
 For auth we use the **official Keycloak client**
-[`keycloak-js`](https://github.com/keycloak/keycloak-js), served directly by
-the `keycloak/keycloak:26.8` image:
-`http://localhost:8081/js/keycloak.js`. No `npm`, no `node_modules`.
+[`keycloak-js`](https://github.com/keycloak/keycloak-js) **26.2.4**, imported as
+an ES module from a CDN in `js/auth.js`
+(`https://cdn.jsdelivr.net/npm/keycloak-js@26.2.4/lib/keycloak.js`). Keycloak 26
+no longer serves `/js/keycloak.js`, and keycloak-js 26 has no global-script
+build. No `npm`, no `node_modules`.
 
 ## Run
 
@@ -54,9 +56,11 @@ CMD ["nginx", "-g", "daemon off;"]
 1. `ui.js` checks `kc.authenticated`. If not → `auth.js` calls `kc.login()`.
 2. Keycloak redirects to the login page of the `listings` realm.
 3. The user types `alice`/`secret` (or `bob`/`secret`).
-4. Keycloak redirects to `http://localhost:3000/auth/callback` with a `code`.
-5. `auth.js` exchanges `code` → `access_token` via the Keycloak token endpoint
-   (PKCE S256).
+4. Keycloak redirects back to the page (`http://localhost:3000/`) with a `code`
+   (`realm.json` allows `http://localhost:3000/*` and `http://localhost:5500/*`).
+5. keycloak-js exchanges `code` → `access_token` via the Keycloak token endpoint
+   (PKCE S256). `ui.js` waits for `kcReady` (the `kc.init` promise) before
+   calling the API.
 6. `ui.js` calls `GET /listings` with `Authorization: Bearer <jwt>`.
 7. Automatic refresh: if the token is about to expire, `auth.js` calls
    `kc.updateToken(30)` before the request.
@@ -65,11 +69,13 @@ CMD ["nginx", "-g", "daemon off;"]
 
 - No `refresh_token` handling in the UI (Keycloak handles it).
 - No `localStorage` for the password (Keycloak handles the login).
-- No CORS of its own (the server must declare it if it runs on another port).
+- No CORS of its own: the **API** must allow the origin `http://localhost:3000`
+  (exercise Step 7, item 1). Without it the browser blocks every call.
 
 ## If it does not work
 
 1. Check that `docker compose ps` is healthy.
-2. Open `http://localhost:8081/realms/listings/protocol/openid-connect/authorize?client_id=listings-spa&redirect_uri=http://localhost:3000/auth/callback&response_type=code` — if the login page does not appear, CORS or `webOrigins` is not set correctly in `realm.json`.
-3. Check the browser console (403 = wrong role, 401 = no token).
-4. Check that the TP1 Spring Boot API is running on `localhost:8080`.
+2. `Invalid parameter: redirect_uri` on the Keycloak page: the SPA is not served from `http://localhost:3000` or `:5500`.
+3. A `CORS` error in the browser console: the API has no CORS configuration for `http://localhost:3000`.
+4. Check the browser console (403 = wrong role, 401 = no or expired token).
+5. Check that the TP1 Spring Boot API is running on `localhost:8080`.
