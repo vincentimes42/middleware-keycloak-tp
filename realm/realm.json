@@ -38,7 +38,13 @@
       ],
       "realmRoles": [
         "seller"
-      ]
+      ],
+      "clientRoles": {
+        "account": [
+          "manage-account",
+          "view-profile"
+        ]
+      }
     },
     {
       "username": "bob",
@@ -57,7 +63,13 @@
       ],
       "realmRoles": [
         "seller"
-      ]
+      ],
+      "clientRoles": {
+        "account": [
+          "manage-account",
+          "view-profile"
+        ]
+      }
     },
     {
       "username": "carol",
@@ -74,7 +86,13 @@
           "temporary": false
         }
       ],
-      "realmRoles": []
+      "realmRoles": [],
+      "clientRoles": {
+        "account": [
+          "manage-account",
+          "view-profile"
+        ]
+      }
     }
   ],
   "clients": [

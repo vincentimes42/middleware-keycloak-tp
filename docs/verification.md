@@ -36,8 +36,13 @@ Tail:
 ```bash
 docker compose ps              # keycloak healthy / keycloak-postgres healthy
 curl -fsS http://localhost:9001/health/ready   # {"status": "UP", ...}
-docker compose logs -f keycloak
+docker compose logs keycloak | grep -E "Realm 'listings' (imported|already exists)"
+# first boot on a new volume: Realm 'listings' imported
+# "already exists. Import skipped": normal after a restart; on a volume from an
+# earlier run, the realm is the old one: check its users below
 ```
+
+(To watch the logs live: `docker compose logs -f keycloak`, Ctrl-C to quit.)
 
 List the realms through the admin API (Step 1 `Verify`):
 
@@ -48,6 +53,9 @@ ADMIN_TOKEN=$(curl -fsS -X POST http://localhost:8081/realms/master/protocol/ope
 curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8081/admin/realms \
   | python3 -c 'import sys,json;print([r["realm"] for r in json.load(sys.stdin)])'
 # expected: ['master', 'listings']
+curl -fsS -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8081/admin/realms/listings/users \
+  | python3 -c 'import sys,json;print(sorted(u["username"] for u in json.load(sys.stdin)))'
+# expected: ['alice', 'bob', 'carol'] (otherwise the realm predates realm.json: reset, §12)
 ```
 
 ## 3) Useful URLs
@@ -109,13 +117,13 @@ Claims that matter for the Spring Boot application (see `exercise.md`):
 |---|---|
 | `iss` | `http://localhost:8081/realms/listings` |
 | `sub` | the Keycloak `uuid` of the user (stable, unique) |
-| `aud` | `listings-api` (audience mapper in `realm.json`) |
+| `aud` | `["listings-api", "account"]` (audience mapper in `realm.json`; `account` comes from the account console roles) |
 | `azp` | `listings-api` |
 | `preferred_username` | `alice` |
 | `email` | `alice@listings.local` |
 | `realm_access.roles` | `["seller"]` |
 | `scope` | `profile email` |
-| `acr` | `1` (level of authentication; Step 8a) |
+| `acr` | `1` (level of authentication; `silver` after Step 8a) |
 
 > `sub` is the stable key that replaces the TP1 `app_user` table — it is the
 > value expected in `listing.owner_sub`.
@@ -139,19 +147,46 @@ tok()  { curl -fsS -X POST $R/protocol/openid-connect/token -d grant_type=passwo
 code() { curl -s -o /dev/null -w "%{http_code}\n" "$@"; }
 ALICE=$(tok alice); BOB=$(tok bob); CAROL=$(tok carol)
 BODY='{"title":"Bike","price":350,"category":"SPORTS"}'
+MASTER=$(curl -fsS -X POST http://localhost:8081/realms/master/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=admin-cli -d username=admin -d password=admin \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')   # valid 60 s: use it at once
 ```
 
 ```bash
 code -X POST $API/listings -H "$JSON" -d "$BODY"                                   # 401
 code -X POST $API/listings -H "$JSON" -d "$BODY" -H "Authorization: Bearer ${ALICE%?}x"   # 401 (tampered)
-code -X POST $API/listings -H "$JSON" -d "$BODY" -H "Authorization: Bearer $ADMIN_TOKEN"  # 401 (master realm, §2)
-code -X POST $API/listings -H "$JSON" -d "$BODY" -H "Authorization: Bearer $ALICE"       # 201
+code -X POST $API/listings -H "$JSON" -d "$BODY" -H "Authorization: Bearer $MASTER"       # 401 (master realm: signed with another key)
+code -X POST $API/listings -H "$JSON" -d '{}' -H "Authorization: Bearer $ALICE"         # 422 (token accepted, body invalid)
 code $API/listings                                                                  # 200
 code $API/listings -H "Authorization: Bearer abc.def.ghi"                           # 401
 curl -s -i -X POST $API/listings -H "$JSON" -d "$BODY" | grep -i '^WWW-Authenticate'   # Bearer ...
 ```
 
-## 8) Step 4 — roles and ownership matrix
+## 8) Step 4 — what the security chain decides
+
+An empty body (`{}`) stops at validation (422), before the service: it shows
+the chain's decision even though the service cannot find a Keycloak caller
+yet (Step 5).
+
+```bash
+for who in anonymous carol bob alice; do
+  case $who in anonymous) H=();; carol) H=(-H "Authorization: Bearer $CAROL");;
+               bob) H=(-H "Authorization: Bearer $BOB");; alice) H=(-H "Authorization: Bearer $ALICE");; esac
+  printf "%-9s POST{}=%s whoami=%s\n" "$who" \
+    "$(code "${H[@]}" -X POST $API/listings -H "$JSON" -d '{}')" "$(code "${H[@]}" $API/auth/whoami)"
+done
+# expected: anonymous 401 401 | carol 403 200 | bob 422 200 | alice 422 200
+code $API/listings                                                    # 200 (public, no token)
+curl -fsS -H "Authorization: Bearer $ALICE" $API/auth/whoami; echo   # sub + roles ["seller"]
+curl -fsS -H "Authorization: Bearer $CAROL" $API/auth/whoami; echo   # roles []
+```
+
+The full matrix (`201`, `PUT` own / other, `DELETE`) needs the owner key of
+Step 5: it opens §9.
+
+## 9) Step 5 — `owner_sub`, local identity removed
+
+Full Step 4 matrix, now that the owner is `sub`:
 
 ```bash
 ID=$(curl -fsS -X POST $API/listings -H "$JSON" -d "$BODY" -H "Authorization: Bearer $ALICE" \
@@ -165,12 +200,9 @@ for who in anonymous carol bob alice; do
 done
 # expected: anonymous 200 401 401 | carol 200 403 403 | bob 200 201 403 | alice 200 201 200
 code -H "Authorization: Bearer $ALICE" -X DELETE $API/listings/$ID                   # 204
-
-curl -fsS -H "Authorization: Bearer $ALICE" $API/auth/whoami; echo                 # sub + roles
-code $API/auth/whoami                                                                # 401
 ```
 
-## 9) Step 5 — `owner_sub`, local identity removed
+`owner_sub` and the removed local identity:
 
 ```bash
 ID=$(curl -fsS -X POST $API/listings -H "$JSON" -d "$BODY" -H "Authorization: Bearer $ALICE" \
@@ -188,8 +220,15 @@ grep -rnE "class User\b|UserRepository|UserService|PasswordEncoder" "$TP1_DIR/sr
   || echo "ok: local identity removed"
 ```
 
-Then replay the TP1 checks (`../springboot/docs/verification.md` §6, §10, §12)
-with `-H "Authorization: Bearer $ALICE"` instead of `-u`.
+Then replay the TP1 checks (`../springboot/docs/verification.md` §6, §7, §10,
+§12) with a bearer token instead of `-u`:
+
+```bash
+# 1) source the TP1 helpers (springboot/docs/verification.md §2): they set ALICE/BOB to email:password
+# 2) then override them with tokens, and use the bearer form in every TP1 command:
+ALICE=$(tok alice); BOB=$(tok bob)
+#    -u "$ALICE"  ->  -H "Authorization: Bearer $ALICE"      (same for BOB)
+```
 
 ## 10) Step 6 (bonus) — 401 / 403 contracts
 
@@ -225,6 +264,7 @@ and the demo accounts return to their initial state.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `keycloak` restarts | `keycloak-postgres` not ready | check `docker compose logs keycloak-postgres` |
+| `carol` missing / an old realm | `Import skipped`: the realm already exists in the volume (import is `IGNORE_EXISTING`) | `docker compose down -v && docker compose up -d` (§12) |
 | `401 invalid_client` | wrong `client_secret` | use `listings-api-secret` |
 | `sub` missing from token | `basic` scope missing | `basic` + `roles` are already in `realm.json` |
 | `404` on `http://localhost:8081/health/ready` | health is served on the management port, not on the main port | use `http://localhost:9001/health/ready` |
