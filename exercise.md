@@ -114,7 +114,8 @@ Bonus steps are optional but count for the grade if you deliver them.
   rejects a token whose `aud` does not contain it.
 - `GET /listings*` stays **public** (same as TP1). Writes require a valid
   token whose `realm_access.roles` contains `seller`, mapped to the Spring
-  authority `ROLE_SELLER` (so TP1's `hasRole("SELLER")` rules do not change).
+  authority `ROLE_SELLER` (so TP1's `hasRole("SELLER")` rules do not change
+  from Step 4 on; Step 3b uses `authenticated()` in the meantime).
 - Accounts (password `secret`): `alice` and `bob` have the role `seller`;
   `carol` has no role.
 - Access tokens expire after **5 minutes**: get a fresh one when a call that
@@ -164,7 +165,11 @@ later failure points at your code, not at a stack that was never up.
    (`docker compose logs -f keycloak` to watch the realm import).
    → The realm is imported during the first boot; a token request before the
    end of the import fails. "Healthy" is the readiness check: once it is
-   green, the realm is there.
+   green, the realm is there. The import only runs if the realm does not
+   exist yet: with a volume from an earlier run, the log says `Import
+   skipped` and the realm may differ from `realm.json` (the users list of
+   `verification.md` §2 shows it). Reset with
+   [`docs/verification.md` §12](docs/verification.md).
 3. **Check** the realm, the OIDC metadata, and the consoles (the `Verify`
    list).
    → The metadata document is what the API reads in Step 3a: if it is wrong
@@ -248,8 +253,9 @@ curl ── GET  /realms/listings/protocol/openid-connect/certs ──> public k
 
 ### Expected behavior
 - The token **payload** carries: `iss` (= `http://localhost:8081/realms/listings`),
-  `sub` (a stable UUID), `aud` (= `listings-api`), `azp` (= `listings-api`),
-  `preferred_username`, `acr` (= `"1"`, see Step 8a), and
+  `sub` (a stable UUID), `aud` (contains `listings-api`; `account` too, for
+  the account console), `azp` (= `listings-api`),
+  `preferred_username`, `acr` (= `"1"`; `"silver"` after Step 8a), and
   `realm_access.roles` **containing `seller`**.
 - A token for `carol` has **no** `realm_access` claim (no realm role).
 - A **`refresh_token`** is present (used to renew the access token).
@@ -339,9 +345,11 @@ no effect, prove nothing regressed, and switch behavior in Step 3b.
 
 **Outcome** — The TP1 API **verifies Keycloak JWTs** (Bearer) and **stops
 using HTTP Basic**: a write with no / bad / forged token → **401**, a write
-with a valid `listings` JWT → **201**, and `GET /listings*` stays **public**.
-The local `user` table and BCrypt are **no longer on any write path** —
-**identity is centralised** and no local password is ever stored.
+with a valid `listings` JWT **gets through the security chain** (the TP1
+**422** on an invalid body proves it), and `GET /listings*` stays **public**.
+**No local password can authenticate anyone anymore** (BCrypt is off every
+request path) — **identity is centralised** and no local password is ever
+stored.
 
 **Why this step** — The API stops checking passwords and starts checking
 **signatures**. It no longer knows who the users are; it trusts any token
@@ -358,7 +366,7 @@ request ── Authorization: Bearer <jwt> ──> BearerTokenAuthenticationFilt
                                          authenticated (claims available)
                                               │
                                               ▼
-                                   controller ──> service   (unchanged in this step)
+                                   controller ──> service   (unchanged: still looks the caller up in app_user → 500 until Step 5)
 ```
 
 ### Build it
@@ -370,6 +378,10 @@ request ── Authorization: Bearer <jwt> ──> BearerTokenAuthenticationFilt
    → Without it, the Bearer header is ignored and every write is still
    checked as Basic, so a valid token gets a 401. The `seller` role mapping is
    **Step 4's** job: this step only enforces "some valid bearer".
+   Until Step 4, protect the writes with **`authenticated()`**: TP1's
+   `hasRole("SELLER")` would answer **403** to every token, because the
+   default converter only produces `SCOPE_…` authorities. Step 4 puts
+   `hasRole("SELLER")` back.
 2. **Keep** `pom.xml` (both `spring-boot-starter-security` +
    `spring-boot-starter-oauth2-resource-server`), `application.yml`
    (`issuer-uri`), and the `UserServiceImpl` bean **unchanged** — but make
@@ -384,20 +396,32 @@ request ── Authorization: Bearer <jwt> ──> BearerTokenAuthenticationFilt
    → Tokens expire within minutes: an old token from Step 2 gives a 401 that
    is not a bug.
 
+> **Checkpoint** — send alice's token with a **valid** body: **500**. Read
+> the error (the response `message`, or the API log, depending on your TP1
+> handler): the service looks for a local user named after the `sub` claim,
+> e.g. `"message": "<alice's sub>"` (`/auth/me` fails the same way). This is expected. The API now knows
+> the caller only by `sub`, and nothing stores a `sub` yet: Step 5 makes
+> `sub` the owner key. With an **invalid** body (`{}`), the same token gets
+> the TP1 **422**: validation runs before the service, so it shows that the
+> chain accepted the token.
+
 ### Expected behavior
 - A **write** (`POST /listings`, `PUT/DELETE /listings/{id}`) with **no**
   `Authorization` header → **401**.
 - A write with a token whose **issuer / audience / signature / expiry** is
   wrong → **401**.
-- A write with a **valid `listings` JWT** is **accepted**; the claims
-  (`sub`, `realm_access.roles`) are available to the security chain.
+- A write with a **valid `listings` JWT** passes the security chain: with an
+  invalid body it gets the TP1 **422**, not a 401; the claims (`sub`,
+  `realm_access.roles`) are available. A valid body fails (500) until Step 5
+  (Checkpoint above).
 - `GET /listings*` **stays public** (no token needed) — **same as TP1**.
 - A `GET /listings*` that **carries** an invalid or expired token → **401**:
   a token, when present, is always checked. (A client that sends a stale
   token on a public read gets a 401, not the public answer.)
 - A token **without** `aud: listings-api` → **401**.
-- The local `user` table and **BCrypt** are **no longer part of any write
-  path** (the bean may exist, but **nothing calls it**).
+- **No request authenticates with a local password**: the BCrypt bean may
+  exist, but **nothing calls it**. The service still reads `app_user` to find
+  the caller: Step 5 removes that.
 
 ### Verify
 
@@ -411,7 +435,8 @@ request ── Authorization: Bearer <jwt> ──> BearerTokenAuthenticationFilt
 - Spring Security reference — same page as Step 3a.
 - In `SecurityConfig`, replace the `httpBasic(...)` clause with `.oauth2ResourceServer(jwt -> jwt.authenticationConverter(…))` — or the default `JwtAuthenticationConverter` + a custom `authoritiesMapper` for the `seller` role (that is **Step 4** territory, not this one).
 - The `BCryptPasswordEncoder` bean can stay as a bean (Spring does not use it anymore) or be removed.
-- `POST /auth/register` may still answer, or — if you keep TP1's behavior — **400** with a clear *"feature deprecated in TP2 — see Step 5"* message. Do **not** let it hash a password into the `user` table — that would **reintroduce** a local password.
+- `POST /auth/register` must no longer create an account: answer **400** with a clear *"feature deprecated in TP2 — see Step 5"* message (Step 5 deletes it). Do **not** let it hash a password into the `user` table — that would **reintroduce** a local password.
+- A token from another realm (`master`, §7) already fails on the **signature** (`no matching key(s) found`), before `iss` is checked: `issuer-uri` matters when one key server signs for several issuers.
 - If you see a `401` with **no** `WWW-Authenticate: Bearer` hint, the `oauth2ResourceServer` config is probably **missing** on that request matcher.
 
 </details>
@@ -421,7 +446,7 @@ request ── Authorization: Bearer <jwt> ──> BearerTokenAuthenticationFilt
 ## Step 4 — Map claims to authorizations   CORE
 
 **Outcome** — **Authorization follows the identity**: a valid token with the
-`seller` role is **allowed to write**, a token without it is **denied**
+`seller` role **passes the role check**, a token without it is **denied**
 (`401` no token / `403` wrong role), `GET /listings*` stays **public**, and a
 new `GET /auth/whoami` returns the **current claims**. The decision is taken
 **from the JWT only** — no local `user` table.
@@ -456,7 +481,8 @@ service ── owner check: sub == listing.owner_sub                            
 1. **Keep** `GET /listings**` **`permitAll()`** (public reads unchanged).
    → Switching to Bearer must not lock visitors out of browsing.
 2. **Require** a valid bearer **plus the `seller` role** on
-   `POST/PUT/DELETE /listings`. Map the role from the claim
+   `POST/PUT/DELETE /listings`: put TP1's `hasRole("SELLER")` back in place
+   of Step 3b's `authenticated()`. Map the role from the claim
    (`realm_access.roles`), e.g. a custom `authoritiesMapper`
    on the `.oauth2ResourceServer(jwt -> jwt.authenticationConverter(…))` chain.
    Map each role to `ROLE_` + the role in **upper case** (`seller` →
@@ -475,7 +501,11 @@ service ── owner check: sub == listing.owner_sub                            
 
 **The authorization contract** (the `PUT`/`DELETE` "own vs other" split is
 decided by `sub == listing.owner_sub` — that key is **introduced in Step 5**;
-this step states the **target** contract):
+this step states the **target** contract). In this step, verify what the
+**security chain** decides: anonymous 401, `carol` 403, `bob` / `alice` get
+through (422 on an invalid body), and `whoami` for everyone. The `201` /
+`PUT` / `DELETE` cells, and a `GET` that carries a token, need the owner key
+of Step 5: they are replayed there.
 
 | Client | GET list | POST | PUT own | PUT other | DELETE own |
 |---|---|---|---|---|---|
@@ -495,7 +525,7 @@ Plus:
 
 ### Verify
 
-- [ ] [`docs/verification.md` §8](docs/verification.md): every row of the matrix matches
+- [ ] [`docs/verification.md` §8](docs/verification.md): every line matches (the full matrix is replayed in Step 5, §9)
 - [ ] `carol` `POST /listings` → **403**, not 500 (her token has no `realm_access` claim)
 
 <details>
@@ -571,14 +601,17 @@ User, UserRepository, UserService, /auth/register, /auth/me ──> deleted   (g
    `AuthController` (`/auth/register`, `/auth/me`), and the
    `UserDetailsService` / `DaoAuthenticationProvider` / `PasswordEncoder`
    beans of `SecurityConfig` (**deleted, not just un-referenced**). Keep
-   `/auth/whoami` (Step 4).
+   `/auth/whoami` (Step 4). Update the tests that use `UserRepository`
+   (e.g. the TP1 smoke test), or they no longer compile.
    → Code that is only un-referenced can be wired back by mistake; deleted
    code cannot reintroduce a local password. The `SecurityConfig` beans
    depend on `UserService`: the app does not start until they go too.
-4. **Add** to `GlobalExceptionHandler` a **404** handler for
-   `NoResourceFoundException`.
-   → A request to a deleted endpoint raises it; without a handler, TP1's
-   catch-all turns it into a 500.
+4. **Check** that `GlobalExceptionHandler` answers **404** for
+   `NoResourceFoundException` (provided since TP1), and keep
+   `/auth/register` and `/auth/me` **`permitAll()`** in `SecurityConfig`.
+   → A request to a deleted endpoint raises it; without that handler, the
+   catch-all would turn it into a 500. Without `permitAll()`, the chain answers
+   **401** to an anonymous client before Spring MVC can answer 404.
 5. **Rebuild + verify** the whole TP1 rule-set by `curl`
    (the TP1 Java tests used Basic auth and **do not apply** after Step 3b).
    → Deleting the identity layer touches the service and the controller:
@@ -596,7 +629,7 @@ User, UserRepository, UserService, /auth/register, /auth/me ──> deleted   (g
 
 ### Verify
 
-- [ ] [`docs/verification.md` §9](docs/verification.md): every result matches *Expected behavior*
+- [ ] [`docs/verification.md` §9](docs/verification.md), starting with the full Step 4 matrix: every result matches *Expected behavior*
 - [ ] `POST /auth/register` → **404** with a JSON body (not 500)
 - [ ] The TP1 business rules still hold (via `curl`): CRUD happy paths, V2 non-seller field hiding, `?version=` V1/V2 fallback, the `listings.creations` counter
 
@@ -655,7 +688,8 @@ and the `WWW-Authenticate` header are that machine-readable signal.
   **same JSON body shape** as TP1.
 - A **public read** (`GET /listings`) without a token still returns **200** —
   Step 6 must not break public reads.
-- **404 / 409 / 422** keep **exactly** the TP1 JSON body shape.
+- **404 / 422** keep **exactly** the TP1 JSON body shape (the 409 left with
+  `/auth/register` in Step 5).
 - The full status-code matrix is the **Step 4** matrix — Step 6 only changes
   *how* the 401 is phrased (the `WWW-Authenticate` header).
 
@@ -668,6 +702,7 @@ and the `WWW-Authenticate` header are that machine-readable signal.
 <summary><strong>If you are stuck</strong></summary>
 
 - `BearerTokenAuthenticationEntryPoint#setRealmName("listings")` adds the `realm` parameter; wrap it (or delegate to it) to also write the JSON body.
+- Spring Security 7 also adds `resource_metadata="…/.well-known/oauth-protected-resource"` (RFC 9728) to the header. That is expected: the contract only requires `Bearer realm="listings"`.
 - `403` "not owner" comes from the **service layer**; `403` "no `seller` role" comes from `SecurityConfig` (its body is written by the `accessDeniedHandler`, not by `@ControllerAdvice`).
 - Test the role 403 with `carol`, the owner 403 with `bob`.
 
@@ -765,7 +800,7 @@ authorization request (acr_values absent, or =gold)
    ▼
 browser flow "browser-stepup" (bound as the realm browser flow)
    ├─ Cookie                                     ALTERNATIVE  (SSO session, if its level is enough)
-   └─ forms                                      ALTERNATIVE
+   └─ stepup-forms                               ALTERNATIVE
         ├─ loa1                                  CONDITIONAL
         │    ├─ Condition - Level of Authentication (level 1)   REQUIRED
         │    └─ Username Password Form                          REQUIRED
@@ -786,7 +821,9 @@ In the admin console of the realm `listings` (no Java):
    → Without the mapping, `acr` stays a bare number and a client cannot ask
    for a level by name.
 2. **Create** the flow `browser-stepup` with the structure of the diagram: a
-   `Cookie` alternative and a `forms` sub-flow holding two conditional
+   `Cookie` alternative and a `stepup-forms` sub-flow (flow aliases are unique
+   in a realm: the built-in `browser` flow already has a `forms` sub-flow)
+   holding two conditional
    sub-flows, `loa1` (password) and `loa2` (WebAuthn), each guarded by a
    *Condition - Level of Authentication* (level 1, then level 2; max age `0`
    for level 2).
@@ -795,13 +832,16 @@ In the admin console of the realm `listings` (no Java):
    authenticator are not locked out.
 3. **Bind** `browser-stepup` as the realm's **browser flow**.
    → The password grant used by scripts goes through the *direct grant* flow,
-   not the browser flow: `curl` tokens of Steps 2-6 are not affected.
+   not the browser flow: `curl` tokens never get a WebAuthn step. Their `acr`
+   does change, from `"1"` to `"silver"`: the *ACR to LoA mapping* is a realm
+   setting. The API does not read `acr`, so Steps 2-6 still pass.
 
 ### Expected behavior
 - With the mapping configured, a password login gives `acr: "silver"`
   (before the mapping, the same login gave `acr: "1"`).
 - `bob` (no authenticator) logs in normally, `acr: "silver"`.
-- Tokens obtained with the password grant (`curl`, Steps 2-6) are unchanged.
+- Tokens obtained with the password grant (`curl`, Steps 2-6) never go
+  through the step-up flow; their `acr` reads `"silver"`.
 - No change in the Java code.
 
 ### Verify
@@ -922,6 +962,7 @@ decision the API takes on a token.
 | `docker compose up` | Keycloak + Postgres healthy, realm imported |
 | `mvn clean verify` (TP1) | green (starter smoke test does not need Keycloak) |
 | README.md | stack run, token, 401/403, claims, choices |
+| `realm-export/listings-step8.json` | only if Step 8b: in this keycloak folder (Appendix C) |
 
 ---
 
@@ -977,6 +1018,11 @@ docker compose restart keycloak                       # reload the imported real
 > their **conditions** and configurations, the **ACR to LoA mapping**, and the
 > users' **credentials** (including `alice`'s WebAuthn key) — the whole
 > authentication policy as data.
+
+> **Sensitive content.** The export contains the client secret, the password
+> hashes, and `alice`'s WebAuthn public key. That is acceptable for this demo
+> realm, never for a real one (keep secrets in a secret store, leave users
+> out).
 
 ## Appendix D — Status codes
 

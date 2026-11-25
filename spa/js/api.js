@@ -23,7 +23,7 @@
 
   window.api = {
     list: (page = 0, size = 20, category, maxPrice) => {
-      const q = new URLSearchParams({ page, size });
+      const q = new URLSearchParams({ page, size, sort: "id,desc" });
       if (category) q.set("category", category);
       if (maxPrice) q.set("maxPrice", maxPrice);
       return req("GET", "/listings?" + q.toString());
