@@ -74,21 +74,25 @@ Everything else (`name`, `email`, `preferred_username` …) is cosmetic.
 
 Every step below touches one part of this picture.
 
+```mermaid
+flowchart TD
+    client(["<b>client</b><br/>curl / SPA"])
+    kc["<b>Keycloak :8081</b><br/>realm listings<br/>users alice, bob, carol"]
+    subgraph api["listings-api :8080"]
+        sec["<b>security chain</b> · Steps 3a-3b<br/><i>verify signature, iss, aud, exp</i>"]
+        map["<b>role mapping</b> · Step 4<br/><i>realm_access.roles → authorities</i>"]
+        svc["<b>service</b> · Step 5<br/><i>owner check: jwt.sub == listing.owner_sub</i>"]
+    end
+    db[("PostgreSQL<br/>listing.owner_sub")]
+    client -- "(1) get a token" --> kc
+    kc -. "JWT (signed)" .-> client
+    client -- "(2) Authorization: Bearer #lt;jwt#gt;" --> sec
+    sec -- "(3) public keys, fetched once" --> kc
+    sec --> map --> svc --> db
 ```
-             (1) get a token                       (3) public keys, fetched once
- client ─────────────────────────> Keycloak :8081 <──────────────────────┐
- curl / SPA <── JWT (signed) ──────  realm listings                       │
-   │                                 users alice, bob                     │
-   │ (2) Authorization: Bearer <jwt>                                       │
-   ▼                                                                       │
- listings-api :8080 ── security chain ── verify signature/iss/aud/exp ─────┘
-                       │                 (Steps 3a-3b)
-                       ├── map realm_access.roles -> authorities (Step 4)
-                       ▼
-                     service ── owner check: jwt.sub == listing.owner_sub (Step 5)
-                       ▼
-                     PostgreSQL listing (owner_sub)
-```
+
+In the step diagrams, the highlighted boxes are the parts you change in that
+step, red boxes are error statuses, and grey dashed boxes are deleted.
 
 ---
 
@@ -99,6 +103,29 @@ Every step below touches one part of this picture.
 | **Core** (required) | 1 · 2 · 3a · 3b · 4 · 5 |
 | **Bonus** (start only when the core `Verify` sections are green) | 6 (401/403 contracts) · 7 (SPA) · 8a-8b (step-up flow, WebAuthn) · refresh · multi-client · logout · admin UI |
 | **Delivery** | 9 (final integration — see Step 9) |
+
+```mermaid
+flowchart TD
+    subgraph core1["CORE, in order"]
+        direction LR
+        s1["1<br/>stack up"] --> s2["2<br/>token + JWT"] --> s3a["3a<br/>declare"] --> s3b["3b<br/>Bearer"]
+    end
+    subgraph core2[" "]
+        direction LR
+        s4["4<br/>roles"] --> s5["5<br/>owner_sub"]
+    end
+    subgraph bonus["BONUS"]
+        direction LR
+        s6["6<br/>401 / 403"]
+        s7["7<br/>SPA"]
+        s8a["8a<br/>step-up"] --> s8b["8b<br/>WebAuthn"]
+        s6 ~~~ s7 ~~~ s8a
+    end
+    core1 --> core2 --> s9["9<br/>delivery"]
+    core2 -. "core green" .-> bonus -.-> s9
+    classDef bonusStep stroke-dasharray:4 3
+    class s6,s7,s8a,s8b bonusStep
+```
 
 Bonus steps are optional but count for the grade if you deliver them.
 
@@ -142,13 +169,19 @@ later failure points at your code, not at a stack that was never up.
 
 ### How it fits
 
-```
-../springboot/docker-compose.yml          keycloak/docker-compose.yml (this repo)
-  listings-api      :8080                   keycloak            :8081 -> 8080
-                                                                :9001 -> 9000 (health)
-  listings-postgres :5435                   keycloak-postgres   :5436
-        └──────────── network `middleware` (created by TP1) ───────────┘
-                                            realm/realm.json -> imported at first boot
+```mermaid
+flowchart LR
+    subgraph net["network middleware (TP1)"]
+        subgraph tp1["../springboot compose"]
+            api["listings-api<br/>:8080"]
+            pg[("listings-postgres<br/>:5435")]
+        end
+        subgraph kcs["keycloak compose"]
+            kc["<b>keycloak</b><br/>:8081 → 8080<br/>:9001 → 9000 (health)"]
+            kpg[("keycloak-postgres<br/>:5436")]
+        end
+    end
+    realm["realm/realm.json"] -. "imported at first boot" .-> kc
 ```
 
 ### Build it
@@ -220,13 +253,15 @@ for trust, `realm_access.roles` for permission, `sub` for ownership.
 
 ### How it fits
 
-```
-curl ── POST /realms/listings/protocol/openid-connect/token ──> Keycloak
-        (client listings-api + secret, user alice + password)      │
-     <── { access_token (JWT), refresh_token, expires_in } ────────┘
-           │
-           └─ decode the payload: iss, sub, azp, realm_access.roles
-curl ── GET  /realms/listings/protocol/openid-connect/certs ──> public keys (JWKS)
+```mermaid
+sequenceDiagram
+    participant C as curl
+    participant K as Keycloak
+    C->>K: POST /realms/listings/protocol/openid-connect/token<br/>client listings-api + secret, user alice + password
+    K-->>C: access_token (JWT), refresh_token, expires_in
+    Note over C: decode the payload:<br/>iss, sub, azp, realm_access.roles
+    C->>K: GET /realms/listings/protocol/openid-connect/certs
+    K-->>C: public keys (JWKS)
 ```
 
 ### Build it
@@ -357,16 +392,17 @@ signed by the issuer it was configured with, and only that issuer.
 
 ### How it fits
 
-```
-request ── Authorization: Bearer <jwt> ──> BearerTokenAuthenticationFilter
-                                              │
-                                              ├─ JwtDecoder (keys from JWKS, Step 3a)
-                                              │    signature, iss, exp ok? ── no ──> 401
-                                              ▼
-                                         authenticated (claims available)
-                                              │
-                                              ▼
-                                   controller ──> service   (unchanged: still looks the caller up in app_user → 500 until Step 5)
+```mermaid
+flowchart TD
+    req(["request<br/>Authorization: Bearer #lt;jwt#gt;"]) --> f["<b>BearerTokenAuthenticationFilter</b> · item 1<br/><i>turned on by oauth2ResourceServer</i>"]
+    f --> dec["<b>JwtDecoder</b><br/><i>keys from JWKS (Step 3a)</i>"]
+    dec -- "invalid" --> e401["401"]
+    dec -- "valid: claims available" --> ctl["controller"]
+    ctl --> svc["service<br/><i>unchanged: still looks the caller up<br/>in app_user → 500 until Step 5</i>"]
+    classDef todo fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    classDef err fill:#fecaca,stroke:#b91c1c,color:#111
+    class f todo
+    class e401 err
 ```
 
 ### Build it
@@ -406,19 +442,26 @@ request ── Authorization: Bearer <jwt> ──> BearerTokenAuthenticationFilt
 > chain accepted the token.
 
 ### Expected behavior
-- A **write** (`POST /listings`, `PUT/DELETE /listings/{id}`) with **no**
-  `Authorization` header → **401**.
-- A write with a token whose **issuer / audience / signature / expiry** is
-  wrong → **401**.
+- The security chain decides in this order; a token, when present, is
+  always checked, even on a public read:
+
+```mermaid
+flowchart LR
+    r(["request"]) --> t{"Bearer token<br/>present?"}
+    t -- "no" --> g{"GET /listings*?"}
+    g -- "yes" --> pub["200<br/><i>public, same as TP1</i>"]
+    g -- "no: a write" --> e1["401"]
+    t -- "yes" --> v{"signature, iss,<br/>aud = listings-api,<br/>exp valid?"}
+    v -- "no" --> e2["401<br/><i>also on a public GET</i>"]
+    v -- "yes" --> ok["chain passed<br/><i>claims available</i>"]
+    classDef err fill:#fecaca,stroke:#b91c1c,color:#111
+    class e1,e2 err
+```
+
 - A write with a **valid `listings` JWT** passes the security chain: with an
   invalid body it gets the TP1 **422**, not a 401; the claims (`sub`,
   `realm_access.roles`) are available. A valid body fails (500) until Step 5
   (Checkpoint above).
-- `GET /listings*` **stays public** (no token needed) — **same as TP1**.
-- A `GET /listings*` that **carries** an invalid or expired token → **401**:
-  a token, when present, is always checked. (A client that sends a stale
-  token on a public read gets a 401, not the public answer.)
-- A token **without** `aud: listings-api` → **401**.
 - **No request authenticates with a local password**: the BCrypt bean may
   exist, but **nothing calls it**. The service still reads `app_user` to find
   the caller: Step 5 removes that.
@@ -458,20 +501,17 @@ This step is the translation between the two.
 
 ### How it fits
 
-```
-valid JWT (Step 3b)
-   │
-   ▼
-JwtAuthenticationConverter ── realm_access.roles ["seller"] ──> authorities [ROLE_…]   (item 2)
-   │
-   ▼
-authorizeHttpRequests ── POST/PUT/DELETE /listings needs the role ── missing ──> 403  (item 2)
-   │
-   ▼
-controller ── GET /auth/whoami returns the claims                                      (item 3)
-   │
-   ▼
-service ── owner check: sub == listing.owner_sub                                       (Step 5)
+```mermaid
+flowchart TD
+    jwt(["valid JWT (Step 3b)"]) --> conv["<b>JwtAuthenticationConverter</b> · item 2<br/><i>realm_access.roles [seller] → authorities [ROLE_SELLER]</i>"]
+    conv --> authz["<b>authorizeHttpRequests</b> · item 2<br/><i>POST / PUT / DELETE /listings need the role</i>"]
+    authz -- "role missing" --> e403["403"]
+    authz --> ctl["<b>controller</b> · item 3<br/><i>GET /auth/whoami returns the claims</i>"]
+    ctl --> svc["service<br/><i>owner check: sub == listing.owner_sub (Step 5)</i>"]
+    classDef todo fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    classDef err fill:#fecaca,stroke:#b91c1c,color:#111
+    class conv,authz,ctl todo
+    class e403 err
 ```
 
 ### Build it
@@ -514,11 +554,24 @@ of Step 5: they are replayed there.
 | **Seller (not owner)** (`bob`) | 200 | 201 | 403 | 403 | 403 |
 | **Seller (owner)** (`alice`) | 200 | 201 | 200 | — | 204 |
 
+A write (`POST`, `PUT`, `DELETE /listings`) is decided in this order; *chain
+passed* is the Step 3b check, *role seller* reads `realm_access.roles`,
+*owner* is `sub == listing.owner_sub` (public reads: Step 3b):
+
+```mermaid
+flowchart LR
+    w(["write"]) --> c{"chain<br/>passed?"}
+    c -- "no" --> e401["401"]
+    c -- "yes" --> r{"role<br/>seller?"}
+    r -- "no: carol" --> e403a["403<br/><i>security chain</i>"]
+    r -- "yes" --> o{"owner?<br/><i>Step 5</i>"}
+    o -- "no: bob" --> e403b["403<br/><i>service</i>"]
+    o -- "yes, or POST" --> ok["201 / 200 / 204"]
+    classDef err fill:#fecaca,stroke:#b91c1c,color:#111
+    class e401,e403a,e403b err
+```
+
 Plus:
-- `GET /listings` and `GET /listings/{id}` stay **public** (no token needed)
-  — same as TP1.
-- `POST /listings` requires a valid token whose `realm_access.roles` contains
-  **`seller`**; otherwise `401` (no token) or `403` (wrong role).
 - `GET /auth/whoami` returns the **current claims**; unauthenticated → `401`.
 - **No local `user` table** is required — the decision comes **from the JWT
   only**.
@@ -555,18 +608,20 @@ copy.
 
 ### How it fits
 
-```
-POST /listings (Bearer, Steps 3b-4)
-   │
-   ▼
-controller ── reads jwt.sub ──> service ── create: owner_sub = sub            (group B)
-                                       └── PUT/DELETE: sub == owner_sub ?     (group B)
-                                              │
-                                              ▼
-                                   listing.owner_sub (new column)             (group A)
-
-User, UserRepository, UserService, /auth/register, /auth/me ──> deleted   (group C)
-(the app_user table stays, unused)
+```mermaid
+flowchart LR
+    req(["POST /listings<br/>Bearer, Steps 3b-4"]) --> ctl["controller<br/><i>reads jwt.sub</i>"]
+    ctl --> svc["<b>service</b> · group B<br/><i>create: owner_sub = sub<br/>PUT / DELETE: sub == owner_sub?</i>"]
+    svc --> col[("<b>listing.owner_sub</b> · group A<br/><i>new column</i>")]
+    subgraph gone["deleted · group C"]
+        loc["User, UserRepository, UserService<br/>/auth/register, /auth/me"]
+    end
+    old[("app_user<br/><i>stays, unused</i>")]
+    gone ~~~ old
+    classDef todo fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    classDef removed fill:#e5e7eb,stroke:#6b7280,stroke-dasharray:4 3,color:#111
+    class svc,col todo
+    class loc removed
 ```
 
 ### Build it
@@ -654,14 +709,22 @@ can **react** (re-login, or "you cannot").
 logged in but not allowed" (403) without parsing a message. The status code
 and the `WWW-Authenticate` header are that machine-readable signal.
 
-> **Not to be confused with Step 4.** Step 4 decides **who can do what** —
-> that decision is unchanged here. Step 6 is only about **how a refusal is
-> phrased** as an HTTP response: the status code, the body shape, and the
-> `WWW-Authenticate` header on 401. It **adds exactly one** requirement on top
-> of Step 4: a protected write that returns **401** (missing/invalid/expired
-> token) must **also** carry
-> `WWW-Authenticate: Bearer realm="listings"` so a well-behaved client knows
-> *where* to log in.
+> **Not to be confused with Step 4.** Step 4 decides **who can do what**,
+> unchanged here. Step 6 only changes **who writes each refusal**, so that
+> every refusal has one JSON shape and the 401 says where to log in:
+
+```mermaid
+flowchart LR
+    e401["401<br/><i>no, invalid, expired token</i>"] --> ep["<b>authenticationEntryPoint</b> · item 1<br/><i>+ WWW-Authenticate: Bearer realm=#quot;listings#quot;</i>"]
+    e403r["403, no seller role<br/><i>carol, security chain</i>"] --> adh["<b>accessDeniedHandler</b> · item 2"]
+    e403o["403, not the owner<br/><i>bob, service</i>"] --> geh["GlobalExceptionHandler<br/><i>TP1, unchanged</i>"]
+    e4xx["404 / 422"] --> geh
+    ep & adh & geh --> json(["one JSON body shape<br/>timestamp, status, error, message"])
+    classDef todo fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    classDef err fill:#fecaca,stroke:#b91c1c,color:#111
+    class ep,adh todo
+    class e401,e403r,e403o,e4xx err
+```
 
 ### Build it
 
@@ -703,7 +766,6 @@ and the `WWW-Authenticate` header are that machine-readable signal.
 
 - `BearerTokenAuthenticationEntryPoint#setRealmName("listings")` adds the `realm` parameter; wrap it (or delegate to it) to also write the JSON body.
 - Spring Security 7 also adds `resource_metadata="…/.well-known/oauth-protected-resource"` (RFC 9728) to the header. That is expected: the contract only requires `Bearer realm="listings"`.
-- `403` "not owner" comes from the **service layer**; `403` "no `seller` role" comes from `SecurityConfig` (its body is written by the `accessDeniedHandler`, not by `@ControllerAdvice`).
 - Test the role 403 with `carol`, the owner 403 with `bob`.
 
 </details>
@@ -723,16 +785,19 @@ go through.
 
 ### How it fits
 
-```
-browser (SPA, public client listings-spa)
-   │ 1. keycloak.init -> redirect to Keycloak login page
-   ▼
-Keycloak :8081 ── 2. alice logs in ── 3. redirect back with a code
-   │
-   ▼
-SPA ── 4. code + PKCE verifier -> token (keycloak-js does it)
-   │
-   └── 5. fetch http://localhost:8080/listings with Authorization: Bearer <jwt>
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser: SPA :3000<br/>public client listings-spa
+    participant K as Keycloak :8081
+    participant A as listings-api :8080
+    B->>K: keycloak.init: redirect to the Keycloak login page
+    Note over K: alice logs in
+    K-->>B: redirect back with a code
+    B->>K: code + PKCE verifier (keycloak-js does it)
+    K-->>B: access token (JWT)
+    B->>A: fetch /listings, Authorization: Bearer jwt
+    A-->>B: 200, CORS allowed for :3000 (item 1)
 ```
 
 ### Build it
@@ -794,22 +859,17 @@ can demand a stronger login for a sensitive action by reading one claim.
 
 ### How it fits
 
-```
-authorization request (acr_values absent, or =gold)
-   │
-   ▼
-browser flow "browser-stepup" (bound as the realm browser flow)
-   ├─ Cookie                                     ALTERNATIVE  (SSO session, if its level is enough)
-   └─ stepup-forms                               ALTERNATIVE
-        ├─ loa1                                  CONDITIONAL
-        │    ├─ Condition - Level of Authentication (level 1)   REQUIRED
-        │    └─ Username Password Form                          REQUIRED
-        └─ loa2                                  CONDITIONAL
-             ├─ Condition - Level of Authentication (level 2)   REQUIRED
-             └─ WebAuthn Authenticator                          REQUIRED
-   │
-   ▼
-token: acr = name mapped to the level reached ("silver" = 1, "gold" = 2)
+```mermaid
+flowchart TD
+    req(["authorization request<br/>acr_values absent, or = gold"]) --> flow["<b>browser-stepup</b><br/><i>bound as the realm browser flow</i>"]
+    flow -- "ALTERNATIVE" --> cookie["<b>Cookie</b><br/><i>SSO session, if its level is enough</i>"]
+    flow -- "ALTERNATIVE" --> forms["<b>stepup-forms</b>"]
+    forms -- "CONDITIONAL" --> l1["<b>loa1</b><br/>REQUIRED: Condition - Level of Authentication, level 1<br/>REQUIRED: Username Password Form"]
+    forms -- "CONDITIONAL" --> l2["<b>loa2</b><br/>REQUIRED: Condition - Level of Authentication, level 2<br/>REQUIRED: WebAuthn Authenticator"]
+    tok(["token: acr = name of the level reached<br/>silver = 1, gold = 2"])
+    cookie & l1 & l2 -.-> tok
+    classDef todo fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#111
+    class flow,cookie,forms,l1,l2 todo
 ```
 
 ### Build it
@@ -885,10 +945,20 @@ delivered until it is exported and versioned with the code.
    exported, it is versioned with the code.
 
 ### Expected behavior
-- A login with `acr_values=gold` asks `alice` for her WebAuthn authenticator
-  **after** the password (or after the SSO cookie, which only proves level 1)
-  and gives `acr: "gold"`.
-- `bob` (no authenticator) still logs in at level 1, `acr: "silver"`.
+- A login that asks for level 2:
+
+```mermaid
+sequenceDiagram
+    actor U as alice
+    participant C as SPA
+    participant K as Keycloak
+    C->>K: authorization request, acr_values=gold
+    K->>U: password form (or SSO cookie: proves level 1 only)
+    K->>U: WebAuthn authenticator (level 2)
+    K-->>C: token, acr: gold
+    Note over C,K: bob (no authenticator) still logs in at level 1, acr: silver
+```
+
 - After `docker compose down -v` and the re-import of Appendix C, the flow,
   the mapping, and `alice`'s WebAuthn credential are back.
 

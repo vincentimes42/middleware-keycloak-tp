@@ -52,15 +52,27 @@ Four players:
 > Note: the resource owner does **not** talk to the resource server directly
 > about identity — they log in at the authorization server (Keycloak).
 
-Core flow (here we use the **authorization code flow**, the modern secure one):
+Core flow: the **authorization code flow**, the modern secure one (the SPA
+uses it in Step 7; scripts use the simpler password grant of Step 2):
 
-1. Client asks Keycloak "let me identify `alice`".
-2. Keycloak redirects the browser to its login page.
-3. User types `alice`/secret. Keycloak is convinced.
-4. Keycloak redirects back to the client with a short-lived **code**.
-5. Client exchanges the code + its own client-secret for an **access token**
-   (a JWT) + a **refresh token**.
-6. Client calls the API with `Authorization: Bearer <jwt>`.
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as alice
+    participant C as Client (SPA)
+    participant K as Keycloak
+    participant A as API
+    C->>K: let me identify alice
+    K->>U: login page (browser redirect)
+    U->>K: alice / secret
+    K-->>C: redirect back with a short-lived code
+    C->>K: code + proof: client secret (confidential client)<br/>or PKCE verifier (public client, the SPA)
+    K-->>C: access token (JWT) + refresh token
+    C->>A: Authorization: Bearer jwt
+```
+
+A browser application cannot keep a secret (its code runs on the user's
+machine): it is a **public** client and proves itself with **PKCE** instead.
 
 ### OIDC (OpenID Connect)
 
